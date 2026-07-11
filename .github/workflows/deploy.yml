@@ -1,0 +1,106 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {} # allows manually re-triggering a deploy without a new commit
+
+env:
+  AWS_REGION: us-east-1
+  PROJECT_NAME: knowledgegpt
+  ECS_CLUSTER: knowledgegpt-cluster
+
+permissions:
+  id-token: write # required for OIDC — no long-lived AWS access keys are stored in this repo
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image tag
+        id: tag
+        run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push backend image
+        working-directory: backend
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          docker build -t "$REGISTRY/${{ env.PROJECT_NAME }}-backend:${{ steps.tag.outputs.tag }}" .
+          docker push "$REGISTRY/${{ env.PROJECT_NAME }}-backend:${{ steps.tag.outputs.tag }}"
+
+      - name: Build and push frontend image
+        working-directory: frontend
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          docker build \
+            --build-arg NEXT_PUBLIC_API_BASE_URL="${{ vars.PUBLIC_API_BASE_URL }}" \
+            -t "$REGISTRY/${{ env.PROJECT_NAME }}-frontend:${{ steps.tag.outputs.tag }}" .
+          docker push "$REGISTRY/${{ env.PROJECT_NAME }}-frontend:${{ steps.tag.outputs.tag }}"
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Registers a new task definition revision for a family, replacing
+      # only the container image (keeping every other setting — CPU,
+      # memory, env vars, secrets — exactly as Terraform last configured
+      # them) and points the corresponding ECS service at the new revision.
+      - name: Deploy backend service
+        run: |
+          FAMILY="${{ env.PROJECT_NAME }}-backend"
+          IMAGE="$(aws ecr describe-repositories --repository-names ${{ env.PROJECT_NAME }}-backend --query 'repositories[0].repositoryUri' --output text):${{ needs.build-and-push.outputs.image_tag }}"
+          CURRENT=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition')
+          NEW_DEF=$(echo "$CURRENT" | jq --arg IMAGE "$IMAGE" '.containerDefinitions[0].image = $IMAGE | .containerDefinitions[0].name = "backend"')
+          NEW_DEF=$(echo "$NEW_DEF" | jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
+          NEW_ARN=$(aws ecs register-task-definition --cli-input-json "$NEW_DEF" --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster ${{ env.ECS_CLUSTER }} --service "${{ env.PROJECT_NAME }}-backend" --task-definition "$NEW_ARN"
+
+      - name: Deploy worker service
+        run: |
+          FAMILY="${{ env.PROJECT_NAME }}-worker"
+          IMAGE="$(aws ecr describe-repositories --repository-names ${{ env.PROJECT_NAME }}-backend --query 'repositories[0].repositoryUri' --output text):${{ needs.build-and-push.outputs.image_tag }}"
+          CURRENT=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition')
+          NEW_DEF=$(echo "$CURRENT" | jq --arg IMAGE "$IMAGE" '.containerDefinitions[0].image = $IMAGE')
+          NEW_DEF=$(echo "$NEW_DEF" | jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
+          NEW_ARN=$(aws ecs register-task-definition --cli-input-json "$NEW_DEF" --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster ${{ env.ECS_CLUSTER }} --service "${{ env.PROJECT_NAME }}-worker" --task-definition "$NEW_ARN"
+
+      - name: Deploy frontend service
+        run: |
+          FAMILY="${{ env.PROJECT_NAME }}-frontend"
+          IMAGE="$(aws ecr describe-repositories --repository-names ${{ env.PROJECT_NAME }}-frontend --query 'repositories[0].repositoryUri' --output text):${{ needs.build-and-push.outputs.image_tag }}"
+          CURRENT=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition')
+          NEW_DEF=$(echo "$CURRENT" | jq --arg IMAGE "$IMAGE" '.containerDefinitions[0].image = $IMAGE')
+          NEW_DEF=$(echo "$NEW_DEF" | jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
+          NEW_ARN=$(aws ecs register-task-definition --cli-input-json "$NEW_DEF" --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster ${{ env.ECS_CLUSTER }} --service "${{ env.PROJECT_NAME }}-frontend" --task-definition "$NEW_ARN"
+
+      - name: Wait for services to stabilize
+        run: |
+          aws ecs wait services-stable --cluster ${{ env.ECS_CLUSTER }} \
+            --services "${{ env.PROJECT_NAME }}-backend" "${{ env.PROJECT_NAME }}-worker" "${{ env.PROJECT_NAME }}-frontend"

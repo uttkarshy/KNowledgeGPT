@@ -1,0 +1,41 @@
+openai>=1.55.0
+pydantic>=2.7
+pydantic-settings>=2.4
+fastapi>=0.115
+gunicorn>=23.0
+uvicorn[standard]>=0.32
+sqlalchemy>=2.0
+asyncpg>=0.29
+pgvector>=0.3
+alembic>=1.13
+passlib>=1.7.4
+# NOTE: bcrypt>=4.1 changed its version metadata in a way passlib 1.7.4's
+# backend probing does not understand, causing a spurious
+# "password cannot be longer than 72 bytes" error on first hash call even
+# for short passwords. Pin <4.1 until passlib ships a fix, or migrate to
+# a maintained CryptContext backend (e.g. argon2-cffi) instead.
+bcrypt>=4.0.1,<4.1
+python-jose[cryptography]>=3.3
+httpx>=0.27
+redis>=5.0
+aiosmtplib>=3.0
+email-validator>=2.1
+boto3>=1.34
+celery>=5.4
+filetype>=1.2
+pymupdf>=1.24
+python-docx>=1.1
+python-pptx>=0.6.23
+openpyxl>=3.1
+beautifulsoup4>=4.12
+lxml>=5.0
+striprtf>=0.0.26
+pytesseract>=0.3.10
+pillow>=10.0
+pandas>=2.2
+# NOTE: tiktoken deliberately NOT used — it downloads its BPE encoding file
+# from a remote blob endpoint at runtime, which failed in this sandbox's
+# restricted-network environment and is a fragile dependency for an
+# air-gapped/restricted production deployment too. See
+# app/services/chunking/token_estimate.py for the character-based
+# approximation used instead for chunk-sizing purposes.
