@@ -148,7 +148,12 @@ services:
       RUN_MIGRATIONS: "false"
     depends_on:
       backend: {condition: service_healthy}
-    healthcheck: {disable: true}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import glob,os,time; p=glob.glob('/tmp/celerybeat-schedule*'); assert p and time.time()-max(os.path.getmtime(f) for f in p)<660"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   frontend:
     build:

@@ -35,7 +35,7 @@ COPY --from=builder /root/.local /home/knowledgegpt/.local
 COPY . .
 RUN chmod +x /app/entrypoint.sh
 
-RUN chown -R knowledgegpt:knowledgegpt /app
+RUN chown -R knowledgegpt:knowledgegpt /app /home/knowledgegpt
 USER knowledgegpt
 
 ENV PATH=/home/knowledgegpt/.local/bin:$PATH \
