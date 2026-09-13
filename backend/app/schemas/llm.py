@@ -9,7 +9,7 @@ import a provider-specific type.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -76,8 +76,9 @@ class LLMStreamChunk(BaseModel):
 
 
 class EmbeddingRequest(BaseModel):
-    texts: list[str]
+    texts: list[str] = Field(min_length=1, max_length=100)
     model: Optional[str] = None
+    task_type: Literal["RETRIEVAL_DOCUMENT", "RETRIEVAL_QUERY"] = "RETRIEVAL_DOCUMENT"
 
 
 class EmbeddingResult(BaseModel):

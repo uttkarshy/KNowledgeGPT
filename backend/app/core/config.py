@@ -16,7 +16,7 @@ from enum import Enum
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,6 +28,7 @@ class LLMProviderName(str, Enum):
     """
 
     OPENAI = "openai"
+    GEMINI = "gemini"
     LOCAL_VLLM = "local_vllm"          # future
     LOCAL_OLLAMA = "local_ollama"      # future
     NVIDIA_NIM = "nvidia_nim"          # future
@@ -73,7 +74,7 @@ class Settings(BaseSettings):
     # ---------------------------------------------------------------
     GOOGLE_CLIENT_ID: Optional[str] = None
     GOOGLE_CLIENT_SECRET: Optional[str] = None
-    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/auth/google/callback"
+    GOOGLE_REDIRECT_URI: str = "http://localhost:3000/auth/google/callback"
 
     # ---------------------------------------------------------------
     # Frontend / email
@@ -105,17 +106,32 @@ class Settings(BaseSettings):
     # (IAM role in production; env vars / ~/.aws/credentials in dev).
     AWS_ACCESS_KEY_ID: Optional[str] = None
     AWS_SECRET_ACCESS_KEY: Optional[str] = None
+    AWS_S3_PUBLIC_ENDPOINT_URL: Optional[str] = None
     AWS_S3_ENDPOINT_URL: Optional[str] = None  # for LocalStack / MinIO in dev
 
     # ---------------------------------------------------------------
     # Upload validation
     # ---------------------------------------------------------------
-    MAX_UPLOAD_SIZE_BYTES: int = 200 * 1024 * 1024  # 200 MB per file
+    MAX_UPLOAD_SIZE_BYTES: int = Field(default=25 * 1024 * 1024, gt=0)
+    MAX_DOCUMENTS_PER_USER: int = Field(default=100, gt=0)
+    MAX_STORAGE_BYTES_PER_USER: int = Field(default=250 * 1024 * 1024, gt=0)
+    MAX_KNOWLEDGE_BASES_PER_USER: int = Field(default=20, gt=0)
+    MAX_CHUNKS_PER_DOCUMENT: int = Field(default=1000, gt=0)
+    MAX_PDF_PAGES: int = Field(default=200, gt=0)
+    EMBEDDING_BATCH_SIZE: int = Field(default=16, ge=1, le=100)
+    EMBEDDING_MAX_INPUT_BYTES: int = Field(default=1800, ge=256, le=2000)
+    RATE_LIMIT_CHAT_PER_MINUTE: int = Field(default=10, gt=0)
+    RATE_LIMIT_CHAT_PER_DAY: int = Field(default=100, gt=0)
+    RATE_LIMIT_UPLOADS_PER_DAY: int = Field(default=20, gt=0)
+    RATE_LIMIT_GLOBAL_CHAT_PER_DAY: int = Field(default=200, gt=0)
+    RATE_LIMIT_GLOBAL_UPLOADS_PER_DAY: int = Field(default=20, gt=0)
+    REGISTRATION_ENABLED: bool = False  # enable deliberately after configuring abuse controls
+    GOOGLE_OAUTH_ENABLED: bool = False
     ALLOWED_FILE_EXTENSIONS: list[str] = Field(
         default_factory=lambda: [
-            "pdf", "docx", "doc", "txt", "csv", "xlsx", "xls", "pptx",
+            "pdf", "docx", "txt", "csv", "xlsx", "pptx",
             "md", "markdown", "html", "htm", "xml", "json", "rtf",
-            "png", "jpg", "jpeg", "tiff", "bmp", "zip",
+            "png", "jpg", "jpeg", "tiff", "bmp",
         ]
     )
 
@@ -133,6 +149,9 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: Optional[str] = None  # falls back to REDIS_URL if unset
     CELERY_TASK_MAX_RETRIES: int = 3
     CELERY_TASK_RETRY_BACKOFF_SECONDS: int = 30
+    CELERY_CONCURRENCY: int = Field(default=2, ge=1, le=8)
+    CELERY_TASK_SOFT_TIME_LIMIT: int = Field(default=840, gt=0)
+    CELERY_TASK_TIME_LIMIT: int = Field(default=900, gt=0)
 
     # ---------------------------------------------------------------
     # CORS
@@ -157,31 +176,35 @@ class Settings(BaseSettings):
     # ---------------------------------------------------------------
     # LLM provider selection — the ONLY place provider choice is made
     # ---------------------------------------------------------------
-    LLM_PROVIDER: LLMProviderName = LLMProviderName.OPENAI
+    LLM_PROVIDER: LLMProviderName = LLMProviderName.GEMINI
 
     # OpenAI settings
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_BASE_URL: Optional[str] = None  # allows Azure/OpenAI-compatible proxies
-
+    # Google Gemini settings
+    GOOGLE_GEMINI_API_KEY: Optional[str] = None
+    GOOGLE_GEMINI_BASE_URL: Optional[str] = None
     # Model names are pure config — never referenced as literals elsewhere.
     LLM_CHAT_MODEL: str = Field(
-        default="gpt-4.1",
-        description="Chat/completion model name used via the Responses API.",
+        default="gemini-2.5-flash",
+        description="Default chat model.",
     )
     LLM_EMBEDDING_MODEL: str = Field(
-        default="text-embedding-3-large",
-        description="Embedding model name.",
+        default="gemini-embedding-001",
+        description="Default embedding model.",
     )
     LLM_EMBEDDING_DIMENSIONS: int = Field(
         default=1536,
+        ge=1536,
+        le=1536,
         description="Must match the pgvector column dimension for the chosen embedding model.",
     )
 
     # Generation tunables — also fully configurable, never hardcoded in providers
     LLM_TEMPERATURE: float = 0.2
-    LLM_MAX_OUTPUT_TOKENS: int = 2048
-    LLM_TIMEOUT_SECONDS: int = 60
-    LLM_MAX_RETRIES: int = 3
+    LLM_MAX_OUTPUT_TOKENS: int = Field(default=2048, ge=1, le=4096)
+    LLM_TIMEOUT_SECONDS: int = Field(default=60, ge=1, le=120)
+    LLM_MAX_RETRIES: int = Field(default=2, ge=0, le=3)
 
     # RAG behavior
     RAG_TOP_K: int = 8
@@ -198,6 +221,21 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_provider(cls, v: str) -> str:
         return v.lower() if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def validate_deployment(self):
+        if self.CELERY_TASK_SOFT_TIME_LIMIT >= self.CELERY_TASK_TIME_LIMIT:
+            raise ValueError("Celery soft time limit must be below hard time limit")
+        if self.ENVIRONMENT == "production":
+            if len(self.JWT_SECRET_KEY) < 32 or any(s in self.JWT_SECRET_KEY.lower() for s in ("change", "dev-only", "test-secret")):
+                raise ValueError("Production requires a random JWT secret of at least 32 characters")
+            if self.DEBUG or self.DATABASE_ECHO or not self.VIRUS_SCAN_ENABLED:
+                raise ValueError("Production requires scanning enabled and debug/SQL echo disabled")
+            if not self.CORS_ALLOWED_ORIGINS or any(not origin.startswith("https://") for origin in self.CORS_ALLOWED_ORIGINS):
+                raise ValueError("Production CORS origins must be explicit HTTPS origins")
+            if not self.FRONTEND_BASE_URL.startswith("https://"):
+                raise ValueError("Production frontend URL must use HTTPS")
+        return self
 
 
 @lru_cache

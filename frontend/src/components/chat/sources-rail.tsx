@@ -14,7 +14,7 @@ interface SourcesRailProps {
 export function SourcesRail({ citations, activeIndex }: SourcesRailProps) {
   if (citations.length === 0) {
     return (
-      <aside className="hidden w-72 shrink-0 border-l border-mist-200 p-4 dark:border-ink-700 lg:block">
+      <aside className="w-full max-h-40 lg:max-h-none lg:w-72 shrink-0 border-l border-mist-200 p-4 dark:border-ink-700">
         <h2 className="font-mono text-xs uppercase tracking-wide text-ink-500">Sources</h2>
         <p className="mt-3 text-sm text-ink-500">
           Sources for the current answer will appear here.
@@ -24,7 +24,7 @@ export function SourcesRail({ citations, activeIndex }: SourcesRailProps) {
   }
 
   return (
-    <aside className="hidden w-80 shrink-0 overflow-y-auto border-l border-mist-200 p-4 dark:border-ink-700 lg:block scrollbar-thin">
+    <aside className="w-full max-h-52 lg:max-h-none lg:w-80 shrink-0 overflow-y-auto border-l border-mist-200 p-4 dark:border-ink-700 scrollbar-thin">
       <h2 className="font-mono text-xs uppercase tracking-wide text-ink-500">
         Sources ({citations.length})
       </h2>

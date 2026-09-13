@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.aws import S3Error, build_upload_key, generate_presigned_put_url, head_object_size
@@ -11,6 +12,7 @@ from app.core.config import Settings
 from app.models.document import Document
 from app.models.enums import DocumentStatus, FileType
 from app.models.knowledge_base import KnowledgeBase
+from app.models.user import User
 
 
 class DocumentServiceError(Exception):
@@ -66,13 +68,20 @@ async def create_upload_url(
     progress UI polls against from the very first moment.
     """
     await _get_owned_knowledge_base(db, kb_id=knowledge_base_id, owner_id=owner_id)
+    await db.scalar(select(User).where(User.id == owner_id).with_for_update())
+    count, used = (await db.execute(select(func.count(Document.id), func.coalesce(func.sum(Document.original_size_bytes), 0)).where(Document.owner_id == owner_id))).one()
+    if count >= settings.MAX_DOCUMENTS_PER_USER or used + size_bytes > settings.MAX_STORAGE_BYTES_PER_USER:
+        raise DocumentServiceError("Document or storage limit reached. Delete unused documents first.")
+    filename = re.sub(r"[\x00-\x1f\x7f/\\]", "_", filename).strip()
+    if not filename or filename in (".", ".."):
+        raise DocumentServiceError("Choose a valid filename")
 
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if ext not in settings.ALLOWED_FILE_EXTENSIONS:
         raise DocumentServiceError(
             f"Extension '.{ext}' is not allowed. Allowed: {', '.join(sorted(settings.ALLOWED_FILE_EXTENSIONS))}"
         )
-    if size_bytes > settings.MAX_UPLOAD_SIZE_BYTES:
+    if size_bytes <= 0 or size_bytes > settings.MAX_UPLOAD_SIZE_BYTES:
         raise DocumentServiceError(
             f"File size {size_bytes} bytes exceeds the {settings.MAX_UPLOAD_SIZE_BYTES} byte limit"
         )
@@ -95,9 +104,9 @@ async def create_upload_url(
     document.temp_storage_key = s3_key
 
     try:
-        url = generate_presigned_put_url(settings=settings, key=s3_key, content_type=content_type)
+        url = generate_presigned_put_url(settings=settings, key=s3_key, content_type=content_type, size_bytes=size_bytes)
     except S3Error as e:
-        raise DocumentServiceError(str(e)) from e
+        raise DocumentServiceError("Upload storage is unavailable. Please retry.") from e
 
     return document, url
 
@@ -116,7 +125,9 @@ async def confirm_upload_and_enqueue(
 ) -> Document:
     """Verifies the object actually landed in S3 (never trust the client's
     say-so), updates status, and enqueues the Celery processing task."""
-    document = await get_owned_document(db, document_id=document_id, owner_id=owner_id)
+    document = await db.scalar(select(Document).where(Document.id == document_id, Document.owner_id == owner_id).with_for_update())
+    if not document:
+        raise DocumentNotFoundError("Document not found")
 
     if document.status != DocumentStatus.PENDING:
         raise DocumentServiceError(f"Document is already in status '{document.status.value}'")
@@ -125,19 +136,30 @@ async def confirm_upload_and_enqueue(
         actual_size = head_object_size(settings=settings, key=document.temp_storage_key)
     except S3Error as e:
         raise UploadNotFoundInS3Error(
-            f"Could not find the uploaded file in storage — did the upload complete? ({e})"
+            "Could not find the uploaded file in storage. Complete the upload and retry."
         ) from e
 
-    document.original_size_bytes = actual_size
+    if actual_size <= 0 or actual_size > settings.MAX_UPLOAD_SIZE_BYTES or actual_size != document.original_size_bytes:
+        document.status = DocumentStatus.FAILED
+        document.status_detail = "Uploaded size does not match the allowed file size"
+        await db.commit()
+        raise DocumentServiceError(document.status_detail)
     document.status = DocumentStatus.VIRUS_SCANNING
     document.processing_progress_pct = 5
-    await db.flush()
 
-    # Imported lazily to avoid FastAPI process needing Celery's broker
-    # connection at import time (keeps `uvicorn app.main:app` fast to boot).
+    await db.commit()
+    await db.refresh(document)
+
     from app.workers.tasks.document_processing import process_document
 
-    process_document.delay(str(document.id))
+    try:
+        process_document.delay(str(document.id))
+    except Exception as exc:
+        document.status = DocumentStatus.FAILED
+        document.status_detail = "Processing queue is unavailable. Please retry."
+        await db.commit()
+        raise DocumentServiceError(document.status_detail) from exc
+
     return document
 
 
@@ -156,6 +178,11 @@ async def delete_document(db: AsyncSession, *, settings: Settings, document_id: 
     from app.core.aws import delete_object
 
     document = await get_owned_document(db, document_id=document_id, owner_id=owner_id)
+    if document.status == DocumentStatus.COMPLETED:
+        await db.execute(update(KnowledgeBase).where(KnowledgeBase.id == document.knowledge_base_id).values(
+            document_count=func.greatest(KnowledgeBase.document_count - 1, 0),
+            total_chunk_count=func.greatest(KnowledgeBase.total_chunk_count - document.chunk_count, 0),
+        ))
     if document.temp_storage_key:
         delete_object(settings=settings, key=document.temp_storage_key)
     await db.delete(document)  # cascades to document_chunks via FK ondelete

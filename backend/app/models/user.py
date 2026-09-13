@@ -95,7 +95,7 @@ class User(Base, UUIDPKMixin, TimestampMixin):
         nullable=True,
     )
 
-    knowledge_bases: Mapped[list["KnowledgeBase"]] = relationship(
+    knowledge_bases: Mapped[list["KnowledgeBase"]] = relationship(  # noqa: F821
         back_populates="owner",
         cascade="all, delete-orphan",
     )

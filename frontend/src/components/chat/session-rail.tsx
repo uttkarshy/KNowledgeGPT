@@ -12,7 +12,7 @@ interface SessionRailProps {
 
 export function SessionRail({ sessions, activeSessionId, onSelect, onCreateNew }: SessionRailProps) {
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-mist-200 dark:border-ink-700">
+    <aside className="flex max-h-40 w-full shrink-0 flex-col lg:max-h-none lg:w-64 border-r border-mist-200 dark:border-ink-700">
       <div className="p-3">
         <button
           onClick={onCreateNew}

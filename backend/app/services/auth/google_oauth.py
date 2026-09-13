@@ -30,7 +30,7 @@ class GoogleUserInfo(BaseModel):
 
 
 async def exchange_code_for_userinfo(
-    *, code: str, settings: Settings
+    *, code: str, settings: Settings, code_verifier: str
 ) -> GoogleUserInfo:
     """Exchanges an authorization code for tokens, then fetches the user's
     profile. Raises GoogleOAuthError on any failure — callers never see
@@ -48,6 +48,7 @@ async def exchange_code_for_userinfo(
                     "client_secret": settings.GOOGLE_CLIENT_SECRET,
                     "redirect_uri": settings.GOOGLE_REDIRECT_URI,
                     "grant_type": "authorization_code",
+                    "code_verifier": code_verifier,
                 },
             )
             token_response.raise_for_status()
@@ -60,11 +61,11 @@ async def exchange_code_for_userinfo(
             userinfo_response.raise_for_status()
             data = userinfo_response.json()
         except httpx.HTTPStatusError as e:
-            raise GoogleOAuthError(f"Google OAuth request failed: {e}") from e
+            raise GoogleOAuthError("Google sign-in was rejected. Please start again.") from e
         except httpx.RequestError as e:
-            raise GoogleOAuthError(f"Could not reach Google OAuth endpoints: {e}") from e
+            raise GoogleOAuthError("Could not reach Google sign-in. Please retry.") from e
         except (KeyError, ValueError) as e:
-            raise GoogleOAuthError(f"Unexpected Google OAuth response shape: {e}") from e
+            raise GoogleOAuthError("Google returned an unexpected sign-in response.") from e
 
     return GoogleUserInfo(
         sub=data["sub"],

@@ -58,7 +58,13 @@ def scan_file(*, file_path: str, settings: Settings) -> None:
                     sock.sendall(size_header + chunk)
                     if not chunk:
                         break
-            response = sock.recv(4096).decode("utf-8", errors="replace").strip()
+            received = bytearray()
+            while b"\0" not in received and len(received) < 4096:
+                data = sock.recv(4096 - len(received))
+                if not data:
+                    break
+                received.extend(data)
+            response = bytes(received).decode("utf-8", errors="replace").rstrip("\0").strip()
     except OSError as e:
         raise VirusScanUnavailableError(
             f"Could not reach ClamAV daemon at {settings.CLAMAV_HOST}:{settings.CLAMAV_PORT}: {e}"

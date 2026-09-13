@@ -29,11 +29,22 @@ celery_app.conf.update(
     accept_content=["json"],
     timezone="UTC",
     enable_utc=True,
+    beat_schedule={"recover-stalled": {"task": "app.workers.tasks.document_processing.reconcile_stalled_documents", "schedule": 300.0}},
     task_track_started=True,
+    task_soft_time_limit=settings.CELERY_TASK_SOFT_TIME_LIMIT,
+    task_time_limit=settings.CELERY_TASK_TIME_LIMIT,
+    worker_concurrency=settings.CELERY_CONCURRENCY,
+    worker_max_tasks_per_child=20,
+    task_publish_retry_policy={"max_retries": 2},
+    result_expires=86400,
     task_acks_late=True,              # re-deliver if a worker dies mid-task
     worker_prefetch_multiplier=1,      # avoid one worker hoarding many large-file jobs
     task_default_retry_delay=settings.CELERY_TASK_RETRY_BACKOFF_SECONDS,
     task_routes={
+        # Must match the queue name the worker container actually listens on
+        # (docker-compose.yml's celery-worker command uses `-Q document_processing`).
+        # Without this, Celery publishes to its default queue ("celery"), which
+        # nothing consumes, and every task silently sits in Redis forever.
         "app.workers.tasks.document_processing.*": {"queue": "document_processing"},
     },
 )

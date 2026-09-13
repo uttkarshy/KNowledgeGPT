@@ -14,6 +14,7 @@ export interface ChatStreamEvent {
   delta: string;
   message_id: string | null;
   citations: Array<{
+    chunk_id: string;
     document_id: string;
     document_name: string;
     page_number: number | null;
@@ -48,6 +49,8 @@ export async function* streamChatAnswer(
   const decoder = new TextDecoder();
   let buffer = "";
 
+  let terminal = false;
+  try {
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -62,10 +65,17 @@ export async function* streamChatAnswer(
       const jsonStr = line.slice("data:".length).trim();
       if (!jsonStr) continue;
       try {
-        yield JSON.parse(jsonStr) as ChatStreamEvent;
+        const event = JSON.parse(jsonStr) as ChatStreamEvent;
+        if (["done", "no_answer", "error"].includes(event.type)) terminal = true;
+        yield event;
       } catch {
-        // Malformed frame — skip rather than crashing the whole stream.
+        throw new Error("The answer stream was invalid. Please retry.");
       }
     }
+  }
+  if (!terminal) throw new Error("The answer was interrupted before it could be saved. Please retry.");
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
   }
 }

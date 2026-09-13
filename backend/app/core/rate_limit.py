@@ -12,7 +12,7 @@ from __future__ import annotations
 from functools import lru_cache
 
 import redis.asyncio as redis
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request
 
 from app.core.config import Settings, get_settings
 
@@ -20,6 +20,21 @@ from app.core.config import Settings, get_settings
 @lru_cache
 def _get_redis_client(redis_url: str) -> redis.Redis:
     return redis.from_url(redis_url, decode_responses=True)
+
+
+async def enforce_limit(settings: Settings, *, key: str, limit: int, seconds: int = 60) -> None:
+    """Atomic expiry avoids immortal counters; fail closed for cost-bearing paths."""
+    client = _get_redis_client(settings.REDIS_URL)
+    try:
+        current = await client.eval("""
+            local n = redis.call('INCR', KEYS[1])
+            if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+            return n
+        """, 1, f"ratelimit:{key}", seconds)
+    except redis.RedisError as exc:
+        raise HTTPException(503, "Request limits are temporarily unavailable. Please retry.") from exc
+    if current > limit:
+        raise HTTPException(429, "Usage limit reached. Please try again later.", headers={"Retry-After": str(seconds)})
 
 
 def rate_limit(*, key_prefix: str, max_requests: int, window_seconds: int = 60):
@@ -32,24 +47,6 @@ def rate_limit(*, key_prefix: str, max_requests: int, window_seconds: int = 60):
 
     async def _enforce(request: Request, settings: Settings = Depends(get_settings)) -> None:
         client_ip = request.client.host if request.client else "unknown"
-        redis_key = f"ratelimit:{key_prefix}:{client_ip}"
-        client = _get_redis_client(settings.REDIS_URL)
-
-        try:
-            current = await client.incr(redis_key)
-            if current == 1:
-                await client.expire(redis_key, window_seconds)
-        except redis.RedisError:
-            # Fail OPEN rather than taking down auth entirely if Redis is
-            # unavailable — logged elsewhere via app-wide error tracking.
-            return
-
-        if current > max_requests:
-            ttl = await client.ttl(redis_key)
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Too many requests. Please try again shortly.",
-                headers={"Retry-After": str(max(ttl, 1))},
-            )
+        await enforce_limit(settings, key=f"{key_prefix}:{client_ip}", limit=max_requests, seconds=window_seconds)
 
     return _enforce

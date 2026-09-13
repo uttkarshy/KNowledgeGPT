@@ -16,12 +16,12 @@ No changes anywhere else.
 
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from typing import Callable
 
 from app.core.config import LLMProviderName, Settings, get_settings
 from app.services.llm.base import LLMProvider
-from app.services.llm.openai_provider import OpenAIProvider
 
 # Providers below are architectural placeholders: the interface, registry,
 # and config wiring are real and final; the implementations raise until a
@@ -35,9 +35,14 @@ from app.services.llm.future_providers import (
     LocalVLLMProvider,
     NvidiaNIMProvider,
 )
+from app.services.llm.gemini_provider import GeminiProvider
+from app.services.llm.openai_provider import OpenAIProvider
+
+logger = logging.getLogger(__name__)
 
 PROVIDER_REGISTRY: dict[LLMProviderName, Callable[[Settings], LLMProvider]] = {
     LLMProviderName.OPENAI: OpenAIProvider,
+    LLMProviderName.GEMINI: GeminiProvider,
     LLMProviderName.LOCAL_VLLM: LocalVLLMProvider,
     LLMProviderName.LOCAL_OLLAMA: LocalOllamaProvider,
     LLMProviderName.NVIDIA_NIM: NvidiaNIMProvider,
@@ -56,11 +61,20 @@ def get_llm_provider() -> LLMProvider:
         async def chat(provider: LLMProvider = Depends(get_llm_provider)):
             ...
     """
-    settings = get_settings()
+    return build_llm_provider(get_settings())
+
+
+def build_llm_provider(settings: Settings) -> LLMProvider:
+    """Fresh provider for one worker invocation; never share across event loops."""
     provider_cls = PROVIDER_REGISTRY.get(settings.LLM_PROVIDER)
     if provider_cls is None:
         raise ValueError(
             f"Unknown LLM_PROVIDER '{settings.LLM_PROVIDER}'. "
             f"Valid options: {[p.value for p in PROVIDER_REGISTRY]}"
         )
+    logger.info(
+    "LLM Provider selected: %s -> %s",
+    settings.LLM_PROVIDER,
+    provider_cls.__name__,
+)
     return provider_cls(settings)

@@ -1,7 +1,8 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ChatInput } from "@/components/chat/chat-input";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { SessionRail } from "@/components/chat/session-rail";
@@ -25,18 +26,16 @@ export default function ChatPage() {
 
 function ChatPageInner() {
   const searchParams = useSearchParams();
-  // In a full app this comes from a knowledge-base picker; for this
-  // increment we read it from the URL (?kb=<id>) since KB
-  // creation/selection UI is a separate Dashboard increment.
+  const router = useRouter();
   const knowledgeBaseId = searchParams.get("kb");
 
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(searchParams.get("session"));
   const [activeCitationIndex, setActiveCitationIndex] = useState<number | null>(null);
   const [lastCitations, setLastCitations] = useState<Citation[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const { data: sessions = [] } = useSessions(knowledgeBaseId);
-  const { data: messages = [] } = useMessages(activeSessionId);
+  const { data: sessions = [], error: sessionsError } = useSessions(knowledgeBaseId);
+  const { data: messages = [], error: messagesError, isLoading: messagesLoading } = useMessages(activeSessionId);
   const createSession = useCreateSession();
   const { ask, streamingText, streamingCitations, isStreaming, streamError } = useAskQuestion(activeSessionId);
 
@@ -45,6 +44,12 @@ function ChatPageInner() {
       setActiveSessionId(sessions[0]?.id ?? null);
     }
   }, [sessions, activeSessionId]);
+
+  useEffect(() => {
+    setLastCitations([]);
+    setActiveCitationIndex(null);
+    if (activeSessionId && knowledgeBaseId) router.replace(`/chat?kb=${knowledgeBaseId}&session=${activeSessionId}`, { scroll: false });
+  }, [activeSessionId, knowledgeBaseId, router]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -56,11 +61,14 @@ function ChatPageInner() {
 
   const handleCreateNew = async () => {
     if (!knowledgeBaseId) return;
-    const session = await createSession.mutateAsync({ knowledgeBaseId });
-    setActiveSessionId(session.id);
+    try {
+      const session = await createSession.mutateAsync({ knowledgeBaseId });
+      setActiveSessionId(session.id);
+    } catch { /* mutation error is shown below */ }
   };
 
   const handleSend = (question: string) => {
+    setLastCitations([]);
     setActiveCitationIndex(null);
     ask(question);
   };
@@ -79,14 +87,14 @@ function ChatPageInner() {
     return (
       <main className="flex min-h-screen items-center justify-center bg-mist-50 dark:bg-ink-950">
         <p className="text-sm text-ink-500">
-          Select a knowledge base from the dashboard to start chatting.
+          <Link href="/dashboard" className="text-stamp-teal underline">Select a knowledge base from the dashboard to start chatting.</Link>
         </p>
       </main>
     );
   }
 
   return (
-    <div className="flex h-screen bg-mist-50 dark:bg-ink-950">
+    <div className="flex h-dvh flex-col lg:flex-row bg-mist-50 dark:bg-ink-950">
       <SessionRail
         sessions={sessions}
         activeSessionId={activeSessionId}
@@ -94,7 +102,10 @@ function ChatPageInner() {
         onCreateNew={handleCreateNew}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <Link href="/dashboard" className="border-b px-4 py-2 text-sm text-stamp-teal">← Knowledge bases</Link>
+        {(sessionsError || messagesError || createSession.error) && <p role="alert" className="p-3 text-danger">{(sessionsError || messagesError || createSession.error)?.message}</p>}
+        {messagesLoading && <p className="p-3">Loading conversation…</p>}
         <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-6 scrollbar-thin">
           {messages.map((message) => (
             <MessageBubble
@@ -107,7 +118,7 @@ function ChatPageInner() {
               inputTokens={message.input_tokens}
               outputTokens={message.output_tokens}
               activeCitationIndex={activeCitationIndex}
-              onCitationClick={handleCitationClick}
+              onCitationClick={(index) => { setLastCitations(message.citations); handleCitationClick(index); }}
             />
           ))}
 
@@ -130,7 +141,7 @@ function ChatPageInner() {
           {messages.length === 0 && !isStreaming && (
             <div className="flex h-full items-center justify-center">
               <p className="text-sm text-ink-500">
-                Ask a question to get started. Answers are grounded only in your uploaded documents.
+                Choose New chat to begin, then ask a question about your documents.
               </p>
             </div>
           )}

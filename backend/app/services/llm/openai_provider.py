@@ -128,7 +128,7 @@ class OpenAIProvider(LLMProvider):
             raise LLMProviderError(f"OpenAI authentication failed: {e}") from e
         except RateLimitError as e:
             raise LLMRateLimitError(f"OpenAI rate limit exceeded: {e}") from e
-        except (APITimeoutError,) as e:
+        except APITimeoutError as e:
             raise LLMTimeoutError(f"OpenAI request timed out: {e}") from e
         except BadRequestError as e:
             raise LLMInvalidRequestError(f"OpenAI rejected request: {e}") from e
@@ -212,6 +212,7 @@ class OpenAIProvider(LLMProvider):
             response = await self._client.embeddings.create(
                 model=model,
                 input=request.texts,
+                dimensions=self._settings.LLM_EMBEDDING_DIMENSIONS,
             )
         except AuthenticationError as e:
             raise LLMProviderError(f"OpenAI authentication failed: {e}") from e
@@ -243,5 +244,8 @@ class OpenAIProvider(LLMProvider):
             await self._client.models.retrieve(self._settings.LLM_CHAT_MODEL)
             return True
         except Exception as e:  # noqa: BLE001 — health check must never raise
-            logger.warning("OpenAI health check failed: %s", e)
+            logger.warning("OpenAI health check failed category=%s", type(e).__name__)
             return False
+
+    async def aclose(self) -> None:
+        await self._client.close()

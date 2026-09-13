@@ -40,7 +40,7 @@ class AuditLog(Base, UUIDPKMixin, TimestampMixin):
     user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    action: Mapped[AuditAction] = mapped_column(Enum(AuditAction, name="audit_action"), nullable=False, index=True)
+    action: Mapped[AuditAction] = mapped_column(Enum(AuditAction, name="audit_action", values_callable=lambda e: [v.value for v in e]), nullable=False, index=True)
     resource_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     resource_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     ip_address: Mapped[Optional[str]] = mapped_column(INET, nullable=True)

@@ -45,7 +45,7 @@ class ChatMessage(Base, UUIDPKMixin, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("chat_messages.id", ondelete="CASCADE"), nullable=True
     )
 
-    role: Mapped[MessageRole] = mapped_column(Enum(MessageRole, name="message_role"), nullable=False)
+    role: Mapped[MessageRole] = mapped_column(Enum(MessageRole, name="message_role", values_callable=lambda e: [v.value for v in e]), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
 
     # Populated for assistant messages only

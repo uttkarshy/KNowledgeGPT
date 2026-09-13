@@ -12,7 +12,7 @@ interface DocumentsPanelProps {
 }
 
 const STATUS_LABELS: Record<DocumentSummary["status"], string> = {
-  pending: "Queued",
+  pending: "Waiting for upload",
   virus_scanning: "Scanning",
   extracting: "Extracting text",
   ocr_processing: "Running OCR",
@@ -29,7 +29,7 @@ function StatusIcon({ status }: { status: DocumentSummary["status"] }) {
 }
 
 export function DocumentsPanel({ knowledgeBaseId, onClose }: DocumentsPanelProps) {
-  const { data: documents = [] } = useDocuments(knowledgeBaseId);
+  const { data: documents = [], isLoading, error: loadError, refetch } = useDocuments(knowledgeBaseId);
   const deleteDocument = useDeleteDocument(knowledgeBaseId);
   const { upload, stage, progress, error } = useUploadDocument(knowledgeBaseId);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -47,13 +47,13 @@ export function DocumentsPanel({ knowledgeBaseId, onClose }: DocumentsPanelProps
       <div className="flex h-full w-full max-w-md flex-col border-l border-mist-200 bg-white dark:border-ink-700 dark:bg-ink-900">
         <div className="flex items-center justify-between border-b border-mist-200 p-4 dark:border-ink-700">
           <h2 className="font-display text-base text-ink-900 dark:text-mist-50">Documents</h2>
-          <button onClick={onClose} className="rounded p-1 hover:bg-mist-100 dark:hover:bg-ink-800">
+          <button aria-label="Close documents" onClick={onClose} className="rounded p-1 hover:bg-mist-100 dark:hover:bg-ink-800">
             <X size={18} />
           </button>
         </div>
 
         <div className="border-b border-mist-200 p-4 dark:border-ink-700">
-          <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileChange} />
+          <input ref={fileInputRef} type="file" accept=".pdf,.docx,.txt,.csv,.xlsx,.pptx,.md,.html,.xml,.json,.rtf,.png,.jpg,.jpeg,.tiff,.bmp" className="hidden" onChange={handleFileChange} />
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isUploading}
@@ -62,11 +62,15 @@ export function DocumentsPanel({ knowledgeBaseId, onClose }: DocumentsPanelProps
             <Upload size={15} />
             {isUploading ? `${stageLabel(stage)}${stage === "uploading" ? ` ${progress}%` : ""}` : "Upload a document"}
           </button>
+          <p className="mt-2 text-xs text-ink-500">Up to 25 MB per document.</p>
+          {stage === "done" && <p role="status" className="mt-2 text-xs">Upload received. Processing will continue below.</p>}
           {error && <p className="mt-2 text-xs text-danger">{error}</p>}
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 scrollbar-thin">
-          {documents.length === 0 && (
+          {isLoading && <p>Loading documents…</p>}
+          {(loadError || deleteDocument.error) && <p role="alert" className="text-sm text-danger">{(loadError || deleteDocument.error)?.message} <button onClick={() => refetch()}>Retry</button></p>}
+          {!isLoading && !loadError && documents.length === 0 && (
             <p className="text-sm text-ink-500">No documents yet. Upload one to get started.</p>
           )}
           <div className="space-y-2">
@@ -87,7 +91,7 @@ export function DocumentsPanel({ knowledgeBaseId, onClose }: DocumentsPanelProps
                       )}
                       {doc.status === "completed" && <span>· {doc.chunk_count} chunks</span>}
                     </div>
-                    {doc.status === "failed" && doc.status_detail && (
+                    {doc.status_detail && (
                       <p className="mt-1 text-[11px] text-danger">{doc.status_detail}</p>
                     )}
                     <div className="mt-1 font-mono text-[10px] text-ink-500">
@@ -95,7 +99,8 @@ export function DocumentsPanel({ knowledgeBaseId, onClose }: DocumentsPanelProps
                     </div>
                   </div>
                   <button
-                    onClick={() => deleteDocument.mutate(doc.id)}
+                    disabled={deleteDocument.isPending}
+                    onClick={() => { if (confirm(`Delete ${doc.name}?`)) deleteDocument.mutate(doc.id); }}
                     className="shrink-0 rounded p-1 text-ink-500 hover:bg-danger/10 hover:text-danger"
                     aria-label={`Delete ${doc.name}`}
                   >

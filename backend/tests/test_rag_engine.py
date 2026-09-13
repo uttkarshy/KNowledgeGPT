@@ -32,7 +32,7 @@ async def test_llm_is_never_called_when_nothing_clears_similarity_threshold():
 
     class ProviderThatMustNotBeCalled:
         async def embed(self, request):
-            return EmbeddingResult(embeddings=[[0.1, 0.2, 0.3, 0.4]], model="fake", dimensions=4, usage=LLMUsage())
+            return EmbeddingResult(embeddings=[[0.1] * 1536], model="gemini-embedding-001", dimensions=1536, usage=LLMUsage())
 
         async def stream(self, request):
             raise AssertionError("LLM must never be called when no chunks clear the similarity threshold")
@@ -72,7 +72,7 @@ async def test_successful_answer_streams_and_generates_accurate_citations():
 
     class FakeProvider:
         async def embed(self, request):
-            return EmbeddingResult(embeddings=[[0.1, 0.2, 0.3, 0.4]], model="fake", dimensions=4, usage=LLMUsage())
+            return EmbeddingResult(embeddings=[[0.1] * 1536], model="gemini-embedding-001", dimensions=1536, usage=LLMUsage())
 
         async def stream(self, request):
             assert any("Revenue grew 12 percent" in m.content for m in request.messages)
@@ -102,6 +102,7 @@ async def test_successful_answer_streams_and_generates_accurate_citations():
     assert "".join(deltas) == "Revenue grew 12 percent according to [1]."
     assert len(done_events) == 1
     assert done_events[0].confidence == 0.89
+    assert done_events[0].citations[0]["chunk_id"] == str(chunk.chunk_id)
     assert done_events[0].citations[0]["document_name"] == "Q3 Report.pdf"
     assert done_events[0].citations[0]["page_number"] == 4
     assert done_events[0].citations[0]["similarity_score"] == 0.89

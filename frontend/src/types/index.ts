@@ -38,6 +38,7 @@ export interface DocumentSummary {
 }
 
 export interface Citation {
+  chunk_id: string;
   document_id: string;
   document_name: string;
   page_number: number | null;

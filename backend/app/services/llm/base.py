@@ -59,6 +59,10 @@ class LLMProvider(ABC):
 
     name: str
 
+    async def aclose(self) -> None:
+        """Release loop-bound clients before their event loop is destroyed."""
+        return None
+
     @abstractmethod
     async def complete(self, request: LLMCompletionRequest) -> LLMCompletionResult:
         """Non-streaming chat completion."""

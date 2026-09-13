@@ -35,7 +35,7 @@ export default function LoginPage() {
         { method: "POST", body: JSON.stringify(data), skipAuth: true }
       );
       setTokens(result.access_token, result.refresh_token);
-      router.push("/chat");
+      router.push("/dashboard");
     } catch (e) {
       setServerError(e instanceof ApiError ? e.detail : "Something went wrong. Try again.");
     } finally {

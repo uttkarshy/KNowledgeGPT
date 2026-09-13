@@ -3,11 +3,27 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, "codex/**"]
+
+permissions:
+  contents: read
 
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports: [5432:5432]
+        options: --health-cmd "pg_isready -U test" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
+      RUN_DB_TESTS: "1"
+      LLM_EMBEDDING_DIMENSIONS: "1536"
     steps:
       - uses: actions/checkout@v4
 
@@ -27,6 +43,13 @@ jobs:
       - name: Lint (ruff)
         working-directory: backend
         run: ruff check app tests
+
+      - name: Initialize and upgrade a clean PostgreSQL database
+        working-directory: backend
+        run: |
+          alembic upgrade 0001_initial_schema
+          alembic upgrade head
+          alembic current
 
       - name: Run tests
         working-directory: backend
@@ -55,7 +78,7 @@ jobs:
         working-directory: frontend
         env:
           NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
-        run: npm run build
+        run: npm run typecheck && npm run build
 
   terraform:
     runs-on: ubuntu-latest
@@ -77,3 +100,27 @@ jobs:
             echo "Validating $dir"
             (cd "$dir" && terraform init -backend=false -input=false && terraform validate)
           done
+          cd environments/production
+          terraform init -backend=false -input=false
+          terraform validate
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Local environment and Compose config
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+      - name: Clean Docker build
+        run: |
+          docker compose -p knowledgegpt-ci down -v --remove-orphans
+          docker compose -p knowledgegpt-ci build --no-cache
+      - name: Boot real local services and verify running source
+        run: |
+          docker compose -p knowledgegpt-ci up -d --wait --wait-timeout 900
+          python scripts/check_container_source.py --project knowledgegpt-ci
+      - name: Cleanup
+        if: always()
+        run: docker compose -p knowledgegpt-ci down -v --remove-orphans

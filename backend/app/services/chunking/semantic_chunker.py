@@ -36,36 +36,54 @@ class Chunk:
 
 
 def _split_long_paragraph(text: str, max_tokens: int) -> list[str]:
-    """Splits a single paragraph that's too big to fit in one chunk, at
-    sentence boundaries, never mid-sentence."""
-    sentences = _SENTENCE_SPLIT_RE.split(text)
+    """Prefer sentence/row boundaries, then words for oversized sentences."""
     pieces: list[str] = []
     current = ""
-    for sentence in sentences:
-        candidate = f"{current} {sentence}".strip() if current else sentence
-        if estimate_tokens(candidate) > max_tokens and current:
-            pieces.append(current)
-            current = sentence
-        else:
-            current = candidate
+    for sentence in re.split(r"(?<=[.!?\u0964])\s+|\n", text):
+        units = [sentence] if estimate_tokens(sentence) <= max_tokens else sentence.split()
+        for unit in units:
+            # An unbroken URL or cell may itself exceed the budget.
+            fragments = [unit]
+            if estimate_tokens(unit) > max_tokens:
+                fragments = [unit[i:i + max_tokens] for i in range(0, len(unit), max_tokens)]
+            for fragment in fragments:
+                candidate = f"{current} {fragment}".strip()
+                if current and estimate_tokens(candidate) > max_tokens:
+                    pieces.append(current)
+                    current = fragment
+                else:
+                    current = candidate
     if current:
         pieces.append(current)
     return pieces
 
 
 def _take_overlap_tail(text: str, overlap_tokens: int) -> str:
-    """Returns roughly the last `overlap_tokens` worth of text, cut at a
-    sentence boundary where possible so overlap reads naturally."""
     if overlap_tokens <= 0:
         return ""
-    sentences = _SENTENCE_SPLIT_RE.split(text)
-    tail = ""
-    for sentence in reversed(sentences):
-        candidate = f"{sentence} {tail}".strip() if tail else sentence
-        if estimate_tokens(candidate) > overlap_tokens and tail:
-            break
-        tail = candidate
-    return tail
+    pieces = _split_long_paragraph(text, overlap_tokens)
+    return pieces[-1] if pieces else ""
+
+
+def bound_chunk_bytes(chunks: list[Chunk], max_bytes: int) -> list[Chunk]:
+    """Hard UTF-8 ceiling prevents tokenizer-dependent silent truncation.
+
+    Keep words together where possible; preserve page/section on every piece.
+    UTF-8 bytes conservatively bound the input token count for supported models.
+    """
+    bounded = []
+    for chunk in chunks:
+        remaining = chunk.text
+        while remaining:
+            raw = remaining.encode("utf-8")
+            part = raw[:max_bytes].decode("utf-8", errors="ignore")
+            if len(raw) > max_bytes:
+                boundary = max(part.rfind("\n"), part.rfind(" "))
+                if boundary > len(part) // 2:
+                    part = part[:boundary]
+            remaining = remaining[len(part):].lstrip()
+            bounded.append(Chunk(part, chunk.page_number, chunk.section_title, estimate_tokens(part)))
+    return bounded
 
 
 def chunk_document(
@@ -101,17 +119,23 @@ def chunk_document(
         if block.kind == SectionKind.HEADING and current_text_parts:
             flush()
 
+        if current_text_parts and block.page_number != current_page:
+            flush()
+            current_text_parts = []
+            current_tokens = 0
+
         current_page = block.page_number if block.page_number is not None else current_page
         current_section = block.section_title if block.section_title is not None else current_section
 
         if block.kind == SectionKind.TABLE:
             if current_text_parts:
                 flush()
-            current_text_parts.append(block.text)
-            current_tokens += block_tokens
+            current_text_parts = []
+            current_tokens = 0
+            for piece in _split_long_paragraph(block.text, chunk_size_tokens):
+                chunks.append(Chunk(piece, current_page, current_section, estimate_tokens(piece)))
             # A table is always its own chunk boundary after being added —
             # don't let unrelated paragraphs get glued onto it.
-            flush()
             continue
 
         if block_tokens > chunk_size_tokens:

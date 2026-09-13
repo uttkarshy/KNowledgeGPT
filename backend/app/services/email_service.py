@@ -13,9 +13,9 @@ of sent, so the rest of the auth flow can be exercised without a mail server.
 from __future__ import annotations
 
 import logging
+from email.message import EmailMessage
 
 import aiosmtplib
-from email.message import EmailMessage
 
 from app.core.config import Settings
 
@@ -24,8 +24,7 @@ logger = logging.getLogger(__name__)
 
 async def _send(settings: Settings, *, to: str, subject: str, html_body: str) -> None:
     if not settings.SMTP_HOST:
-        logger.info("SMTP not configured — logging email instead of sending.\nTo: %s\nSubject: %s\nBody:\n%s",
-                     to, subject, html_body)
+        logger.info("Transactional email skipped: SMTP is not configured")
         return
 
     message = EmailMessage()

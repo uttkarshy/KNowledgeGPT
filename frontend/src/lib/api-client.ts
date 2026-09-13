@@ -81,6 +81,7 @@ export async function apiFetch(path: string, options: RequestOptions = {}): Prom
 
   const doFetch = (token: string | null) =>
     fetch(`${API_BASE}${path}`, {
+      credentials: "include",
       ...rest,
       headers: {
         "Content-Type": "application/json",
@@ -107,7 +108,7 @@ export async function apiJson<T>(path: string, options: RequestOptions = {}): Pr
     let detail = response.statusText;
     try {
       const body = await response.json();
-      detail = body.detail || detail;
+      detail = Array.isArray(body.detail) ? body.detail.map((e: { message?: string; msg?: string }) => e.message || e.msg || "Invalid input").join("; ") : String(body.detail || detail);
     } catch {
       /* response body wasn't JSON */
     }

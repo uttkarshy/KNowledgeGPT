@@ -47,6 +47,9 @@ class PDFExtractor(TextExtractor):
             raise ExtractionError(f"Could not open PDF: {e}") from e
 
         pages: list[ExtractedPage] = []
+        if doc.is_encrypted or len(doc) > settings.MAX_PDF_PAGES:
+            doc.close()
+            raise ExtractionError("PDF is encrypted or exceeds the page limit")
         current_section_title: str | None = None
         lang_votes: dict[str, int] = {}
 
@@ -62,6 +65,8 @@ class PDFExtractor(TextExtractor):
                 pages.append(ExtractedPage(page_number=page_number, blocks=blocks, was_ocr=False))
                 lang_votes["native"] = lang_votes.get("native", 0) + 1
             else:
+                if page.rect.width * page.rect.height * _OCR_RENDER_DPI_ZOOM**2 > 30_000_000:
+                    raise ExtractionError("PDF page exceeds the safe OCR pixel limit")
                 pix = page.get_pixmap(matrix=fitz.Matrix(_OCR_RENDER_DPI_ZOOM, _OCR_RENDER_DPI_ZOOM))
                 image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
 

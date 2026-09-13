@@ -1,0 +1,139 @@
+{
+  "github_base": "2895a01e24137b9ed08f742c3b5b3dbb538e6033",
+  "archive": "knowledgegpt(4)(3).zip",
+  "archive_git_history": false,
+  "differences": [
+    {
+      "file": ".env",
+      "state": "archive-only",
+      "github_last_commit": null
+    },
+    {
+      "file": ".env.example",
+      "state": "github-only",
+      "github_last_commit": "2026-07-11T22:33:20+05:30"
+    },
+    {
+      "file": "backend/.env.example",
+      "state": "github-only",
+      "github_last_commit": "2026-07-11T22:33:20+05:30"
+    },
+    {
+      "file": "backend/app/core/aws.py",
+      "state": "different",
+      "github_last_commit": "2026-07-11T22:33:20+05:30"
+    },
+    {
+      "file": "backend/app/core/config.py",
+      "state": "different",
+      "github_last_commit": "2026-07-11T22:33:20+05:30"
+    },
+    {
+      "file": "backend/app/db/session.py",
+      "state": "different",
+      "github_last_commit": "2026-07-11T22:33:20+05:30"
+    },
+    {
+      "file": "backend/app/models/document.py",
+      "state": "different",
+      "github_last_commit": "2026-07-11T22:33:20+05:30"
+    },
+    {
+      "file": "backend/app/models/user.py",
+      "state": "different",
+      "github_last_commit": "2026-07-11T23:12:00+05:30"
+    },
+    {
+      "file": "backend/app/services/document_service.py",
+      "state": "different",
+      "github_last_commit": "2026-07-11T22:33:20+05:30"
+    },
+    {
+      "file": "backend/app/services/extraction/xlsx_extractor.py",
+      "state": "different",
+      "github_last_commit": "2026-07-11T22:33:20+05:30"
+    },
+    {
+      "file": "backend/app/services/llm/factory.py",
+      "state": "different",
+      "github_last_commit": "2026-07-11T22:33:20+05:30"
+    },
+    {
+      "file": "backend/app/services/llm/gemini_provider.py",
+      "state": "archive-only",
+      "github_last_commit": null
+    },
+    {
+      "file": "backend/app/workers/celery_app.py",
+      "state": "different",
+      "github_last_commit": "2026-07-11T22:33:20+05:30"
+    },
+    {
+      "file": "backend/app/workers/tasks/document_processing.py",
+      "state": "different",
+      "github_last_commit": "2026-07-11T22:33:20+05:30"
+    },
+    {
+      "file": "backend/requirements.txt",
+      "state": "different",
+      "github_last_commit": "2026-07-11T22:33:20+05:30"
+    },
+    {
+      "file": "backend/tests/test_document_processing_task.py",
+      "state": "archive-only",
+      "github_last_commit": null
+    },
+    {
+      "file": "backend/tests/test_xlsx_and_chunking_at_scale.py",
+      "state": "archive-only",
+      "github_last_commit": null
+    },
+    {
+      "file": "docker-compose.yml",
+      "state": "different",
+      "github_last_commit": "2026-07-11T22:33:20+05:30"
+    },
+    {
+      "file": "new.py",
+      "state": "archive-only",
+      "github_last_commit": null
+    },
+    {
+      "file": "package-lock.json",
+      "state": "archive-only",
+      "github_last_commit": null
+    },
+    {
+      "file": "package.json",
+      "state": "archive-only",
+      "github_last_commit": null
+    }
+  ],
+  "recovered_files": [
+    "backend/app/core/aws.py",
+    "backend/app/core/config.py",
+    "backend/app/db/session.py",
+    "backend/app/models/document.py",
+    "backend/app/models/user.py",
+    "backend/app/services/document_service.py",
+    "backend/app/services/extraction/xlsx_extractor.py",
+    "backend/app/services/llm/factory.py",
+    "backend/app/services/llm/gemini_provider.py",
+    "backend/app/workers/celery_app.py",
+    "backend/app/workers/tasks/document_processing.py",
+    "backend/requirements.txt",
+    "backend/tests/test_document_processing_task.py",
+    "backend/tests/test_xlsx_and_chunking_at_scale.py",
+    "docker-compose.yml"
+  ],
+  "excluded": [
+    ".env",
+    "new.py",
+    "package.json",
+    "package-lock.json",
+    "node_modules",
+    "__pycache__",
+    ".ruff_cache"
+  ],
+  "secret_scan_history_findings": []
+}

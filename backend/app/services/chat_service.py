@@ -3,8 +3,8 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.chat import ChatMessage, ChatSession
 from app.models.knowledge_base import KnowledgeBase

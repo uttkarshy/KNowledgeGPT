@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+import base64
+import hashlib
+import secrets
+from urllib.parse import urlencode
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.core.config import Settings, get_settings
-from app.core.rate_limit import rate_limit
+from app.core.rate_limit import _get_redis_client, rate_limit
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.auth import (
@@ -42,6 +47,8 @@ async def register(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
+    if not settings.REGISTRATION_ENABLED:
+        raise HTTPException(503, "New registrations are temporarily closed. Please contact support.")
     try:
         user = await auth_service.register_user(
             db, settings=settings, email=body.email, password=body.password, full_name=body.full_name
@@ -90,7 +97,7 @@ async def refresh(
             db,
             settings=settings,
             plaintext_refresh_token=body.refresh_token,
-            **dict(zip(("user_agent", "ip_address"), _client_context(request))),
+            **dict(zip(("user_agent", "ip_address"), _client_context(request), strict=True)),
         )
     except auth_service.InvalidOrExpiredTokenError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e)) from e
@@ -145,17 +152,20 @@ async def reset_password(body: ResetPasswordRequest, db: AsyncSession = Depends(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
-@router.get("/google/login")
-async def google_login(settings: Settings = Depends(get_settings)):
-    """Returns the URL the frontend should redirect the user to."""
-    params = (
-        f"client_id={settings.GOOGLE_CLIENT_ID}"
-        f"&redirect_uri={settings.GOOGLE_REDIRECT_URI}"
-        "&response_type=code"
-        "&scope=openid%20email%20profile"
-        "&access_type=offline"
-        "&prompt=consent"
-    )
+@router.get("/google/login", dependencies=[Depends(rate_limit(key_prefix="oauth", max_requests=5))])
+async def google_login(response: Response, settings: Settings = Depends(get_settings)):
+    if not settings.GOOGLE_OAUTH_ENABLED or not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
+        raise HTTPException(503, "Google sign-in is not configured. Use email and password.")
+    state = secrets.token_urlsafe(32)
+    verifier = secrets.token_urlsafe(48)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    await _get_redis_client(settings.REDIS_URL).set(f"oauth:{state}", verifier, ex=300)
+    response.set_cookie("kgpt_oauth_state", state, httponly=True,
+                        secure=settings.ENVIRONMENT == "production", samesite="lax", max_age=300,
+                        path="/api/auth/google")
+    params = urlencode({"client_id": settings.GOOGLE_CLIENT_ID, "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+                        "response_type": "code", "scope": "openid email profile", "state": state,
+                        "code_challenge": challenge, "code_challenge_method": "S256"})
     return {"authorization_url": f"https://accounts.google.com/o/oauth2/v2/auth?{params}"}
 
 
@@ -166,10 +176,18 @@ async def google_callback(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
+    if not settings.GOOGLE_OAUTH_ENABLED:
+        raise HTTPException(503, "Google sign-in is not configured")
+    cookie_state = request.cookies.get("kgpt_oauth_state", "")
+    if not body.state or not cookie_state or not secrets.compare_digest(body.state, cookie_state):
+        raise HTTPException(400, "Invalid Google sign-in state. Start sign-in again.")
+    verifier = await _get_redis_client(settings.REDIS_URL).getdel(f"oauth:{body.state}")
+    if not verifier:
+        raise HTTPException(400, "Google sign-in expired or was already used")
     try:
-        google_info = await exchange_code_for_userinfo(code=body.code, settings=settings)
+        google_info = await exchange_code_for_userinfo(code=body.code, settings=settings, code_verifier=verifier)
         user = await auth_service.get_or_create_google_user(db, google_info=google_info)
-    except GoogleOAuthError as e:
+    except (GoogleOAuthError, auth_service.InvalidCredentialsError) as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except auth_service.AccountSuspendedError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e)) from e

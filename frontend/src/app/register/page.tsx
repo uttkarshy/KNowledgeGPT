@@ -20,7 +20,8 @@ const registerSchema = z.object({
     .regex(/[A-Z]/, "At least one uppercase letter")
     .regex(/[a-z]/, "At least one lowercase letter")
     .regex(/\d/, "At least one digit")
-    .regex(/[^\w\s]/, "At least one special character"),
+    .regex(/[^\w\s]/, "At least one special character")
+    .refine(v => new TextEncoder().encode(v).length <= 72, "Maximum 72 UTF-8 bytes"),
 });
 
 type RegisterForm = z.infer<typeof registerSchema>;
@@ -59,9 +60,9 @@ export default function RegisterPage() {
     return (
       <main className="min-h-screen flex items-center justify-center bg-mist-50 dark:bg-ink-950 px-4">
         <div className="max-w-sm text-center">
-          <h1 className="font-display text-xl text-ink-900 dark:text-mist-50">Check your email</h1>
+          <h1 className="font-display text-xl text-ink-900 dark:text-mist-50">Account created</h1>
           <p className="mt-2 text-sm text-ink-500">
-            We sent a verification link to your inbox. Redirecting you to sign in…
+            Your account is ready. If email verification is enabled, check your inbox. Redirecting you to sign in…
           </p>
         </div>
       </main>

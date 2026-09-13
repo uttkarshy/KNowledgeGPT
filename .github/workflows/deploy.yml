@@ -1,9 +1,7 @@
 name: Deploy to AWS
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch: {} # allows manually re-triggering a deploy without a new commit
+  workflow_dispatch: {} # requires completed CI, real acceptance and budget approval; disabled by default
 
 env:
   AWS_REGION: us-east-1
@@ -16,6 +14,8 @@ permissions:
 
 jobs:
   build-and-push:
+    if: github.ref == 'refs/heads/main' && vars.PRODUCTION_DEPLOY_ENABLED == 'true'
+    environment: production
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
@@ -55,6 +55,7 @@ jobs:
           docker push "$REGISTRY/${{ env.PROJECT_NAME }}-frontend:${{ steps.tag.outputs.tag }}"
 
   deploy:
+    environment: production
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:

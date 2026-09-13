@@ -13,6 +13,7 @@ This also saves the cost/latency of a doomed API call.
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -20,13 +21,17 @@ from dataclasses import dataclass, field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.models.chat import ChatCitation, ChatMessage as ChatMessageModel, ChatSession
+from app.models.chat import ChatCitation, ChatSession
+from app.models.chat import ChatMessage as ChatMessageModel
 from app.models.enums import MessageRole as DBMessageRole
+from app.models.usage import ApiUsageLog
 from app.schemas.llm import ChatMessage, LLMCompletionRequest, MessageRole
 from app.services.llm.base import LLMProvider
 from app.services.rag.context_compression import compress_context
 from app.services.rag.prompt_assembly import assemble_messages
 from app.services.rag.retrieval import RetrievalFilters, RetrievedChunk, similarity_search
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -97,10 +102,13 @@ async def answer_question(
     try:
         from app.schemas.llm import EmbeddingRequest
 
-        embed_result = await provider.embed(EmbeddingRequest(texts=[question]))
+        embed_result = await provider.embed(EmbeddingRequest(texts=[question], task_type="RETRIEVAL_QUERY"))
+        if embed_result.dimensions != settings.LLM_EMBEDDING_DIMENSIONS or embed_result.model != settings.LLM_EMBEDDING_MODEL or len(embed_result.embeddings) != 1:
+            raise ValueError("Embedding contract mismatch")
         query_embedding = embed_result.embeddings[0]
     except Exception as e:
-        yield RAGStreamEvent(type="error", error=f"Could not process your question: {e}")
+        logger.warning("question_embedding_failed session=%s category=%s", session.id, type(e).__name__)
+        yield RAGStreamEvent(type="error", error="Could not process your question. Please retry or contact support.")
         return
 
     # ---------------- Retrieve ----------------
@@ -109,6 +117,7 @@ async def answer_question(
         knowledge_base_id=session.knowledge_base_id,
         owner_id=session.owner_id,
         query_embedding=query_embedding,
+        embedding_model=settings.LLM_EMBEDDING_MODEL,
         top_k=settings.RAG_TOP_K,
         min_similarity=settings.RAG_MIN_SIMILARITY,
         filters=filters,
@@ -148,10 +157,14 @@ async def answer_question(
                 input_tokens = stream_chunk.usage.input_tokens
                 output_tokens = stream_chunk.usage.output_tokens
     except Exception as e:
-        yield RAGStreamEvent(type="error", error=f"The model provider returned an error: {e}")
+        logger.warning("chat_provider_failed session=%s category=%s", session.id, type(e).__name__)
+        yield RAGStreamEvent(type="error", error="The model is temporarily unavailable. Please retry.")
         return
 
     full_text = "".join(full_text_parts)
+    if not full_text.strip():
+        yield RAGStreamEvent(type="error", error="The model returned no answer. Please rephrase your question.")
+        return
     latency_ms = int((time.perf_counter() - start_time) * 1000)
     top_confidence = max(c.similarity for c in context_chunks)
 
@@ -183,6 +196,7 @@ async def answer_question(
         db.add(citation)
         citation_dicts.append(
             {
+                "chunk_id": str(chunk.chunk_id),
                 "document_id": str(chunk.document_id),
                 "document_name": chunk.document_name,
                 "page_number": chunk.page_number,
@@ -192,6 +206,8 @@ async def answer_question(
             }
         )
     await db.flush()
+    db.add(ApiUsageLog(user_id=session.owner_id, endpoint="rag/completion", model=settings.LLM_CHAT_MODEL,
+                       input_tokens=input_tokens, output_tokens=output_tokens, latency_ms=latency_ms))
 
     yield RAGStreamEvent(
         type="done",

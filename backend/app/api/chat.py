@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -9,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.core.config import Settings, get_settings
+from app.core.rate_limit import enforce_limit
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.chat import (
@@ -84,20 +87,32 @@ async def ask_question(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
     filters = RetrievalFilters(document_ids=body.document_ids, language=body.language)
+    await enforce_limit(settings, key=f"chat:{current_user.id}", limit=settings.RATE_LIMIT_CHAT_PER_MINUTE)
+    await enforce_limit(settings, key=f"chat_daily:{current_user.id}", limit=settings.RATE_LIMIT_CHAT_PER_DAY, seconds=86400)
+    await enforce_limit(settings, key="chat_global", limit=settings.RATE_LIMIT_GLOBAL_CHAT_PER_DAY, seconds=86400)
 
     async def event_stream():
-        async for event in answer_question(
-            db, settings=settings, provider=provider, session=session, question=body.question, filters=filters
-        ):
-            payload = {
-                "type": event.type,
-                "delta": event.delta,
-                "message_id": str(event.message_id) if event.message_id else None,
-                "citations": event.citations,
-                "confidence": event.confidence,
-                "error": event.error,
-            }
-            yield f"data: {json.dumps(payload)}\n\n"
-        await db.commit()
+        try:
+            async with asyncio.timeout(settings.LLM_TIMEOUT_SECONDS * 2):
+                async for event in answer_question(
+                    db, settings=settings, provider=provider, session=session, question=body.question, filters=filters
+                ):
+                    if event.type in {"done", "no_answer"}:
+                        await db.commit()  # terminal success means persisted, even after immediate refresh
+                    elif event.type == "error":
+                        await db.rollback()
+                    payload = {
+                        "type": event.type, "delta": event.delta,
+                        "message_id": str(event.message_id) if event.message_id else None,
+                        "citations": event.citations, "confidence": event.confidence, "error": event.error,
+                    }
+                    yield f"data: {json.dumps(payload)}\n\n"
+        except asyncio.CancelledError:
+            await db.rollback()
+            raise
+        except Exception as exc:
+            await db.rollback()
+            logging.getLogger(__name__).error("chat_failed session=%s category=%s", session_id, type(exc).__name__)
+            yield 'data: {"type":"error","error":"The answer could not be saved or completed. Please retry."}\n\n'
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache, no-store", "X-Accel-Buffering": "no"})

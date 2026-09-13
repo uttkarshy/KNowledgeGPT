@@ -1,5 +1,34 @@
 name: knowledgegpt
 
+x-app-env: &app-env
+  ENVIRONMENT: development
+  DATABASE_URL: postgresql+asyncpg://knowledgegpt:knowledgegpt@postgres:5432/knowledgegpt
+  REDIS_URL: redis://redis:6379/0
+  CLAMAV_HOST: clamav
+  VIRUS_SCAN_ENABLED: "true"
+  LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
+  LLM_CHAT_MODEL: ${LLM_CHAT_MODEL:-gemini-2.5-flash}
+  LLM_EMBEDDING_MODEL: ${LLM_EMBEDDING_MODEL:-gemini-embedding-001}
+  LLM_EMBEDDING_DIMENSIONS: ${LLM_EMBEDDING_DIMENSIONS:-1536}
+  LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.2}
+  LLM_MAX_OUTPUT_TOKENS: ${LLM_MAX_OUTPUT_TOKENS:-2048}
+  LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-60}
+  LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-2}
+  GOOGLE_GEMINI_API_KEY: ${GOOGLE_GEMINI_API_KEY:-}
+  GOOGLE_GEMINI_BASE_URL: ${GOOGLE_GEMINI_BASE_URL:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-only-insecure-secret-change-me}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-knowledgegpt}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-knowledgegpt-local-only}
+  AWS_REGION: ${AWS_REGION:-us-east-1}
+  S3_BUCKET_NAME: ${S3_BUCKET_NAME:-knowledgegpt-uploads-dev}
+  AWS_S3_ENDPOINT_URL: ${AWS_S3_ENDPOINT_URL:-http://minio:9000}
+  AWS_S3_PUBLIC_ENDPOINT_URL: ${AWS_S3_PUBLIC_ENDPOINT_URL:-http://localhost:9000}
+  FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:3000}
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-["http://localhost:3000"]}
+  REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-true}
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -8,94 +37,125 @@ services:
       POSTGRES_USER: knowledgegpt
       POSTGRES_PASSWORD: knowledgegpt
       POSTGRES_DB: knowledgegpt
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    ports: ["127.0.0.1:5432:5432"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U knowledgegpt"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
 
   redis:
     image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    volumes: [redis_data:/data]
+    ports: ["127.0.0.1:6379:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
 
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:-knowledgegpt}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:-knowledgegpt-local-only}
+      MINIO_API_CORS_ALLOW_ORIGIN: http://localhost:3000
+    volumes: [minio_data:/data]
+    ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  s3-init:
+    image: minio/mc:latest
+    depends_on:
+      minio: {condition: service_healthy}
+    environment:
+      S3_USER: ${AWS_ACCESS_KEY_ID:-knowledgegpt}
+      S3_PASSWORD: ${AWS_SECRET_ACCESS_KEY:-knowledgegpt-local-only}
+      S3_BUCKET: ${S3_BUCKET_NAME:-knowledgegpt-uploads-dev}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mc alias set local http://minio:9000 "$$S3_USER" "$$S3_PASSWORD" &&
+        mc mb --ignore-existing "local/$$S3_BUCKET" &&
+        mc ilm rule add --expire-days 1 "local/$$S3_BUCKET"
+
+  clamav:
+    image: clamav/clamav:stable
+    volumes: [clamav_data:/var/lib/clamav]
+    healthcheck:
+      test: ["CMD", "clamdscan", "--ping=1"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 120s
 
   backend:
-    build:
-      context: ./backend
+    build: ./backend
     restart: unless-stopped
+    env_file: .env
     environment:
-      ENVIRONMENT: development
-      DATABASE_URL: postgresql+asyncpg://knowledgegpt:knowledgegpt@postgres:5432/knowledgegpt
-      REDIS_URL: redis://redis:6379/0
-      CLAMAV_HOST: clamav
-      CLAMAV_PORT: 3310
-      VIRUS_SCAN_ENABLED: "false"
-      CORS_ALLOWED_ORIGINS: '["http://localhost:3000"]'
+      <<: *app-env
       RUN_MIGRATIONS: "true"
-      # Secrets/keys below are read from a local .env file (see .env.example)
-      # rather than hardcoded here — docker-compose automatically loads a
-      # sibling .env file into ${VAR} references.
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-only-insecure-secret-change-me}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-knowledgegpt-uploads-dev}
-      AWS_REGION: ${AWS_REGION:-us-east-1}
-    ports:
-      - "8000:8000"
+    ports: ["127.0.0.1:8000:8000"]
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      clamav: {condition: service_healthy}
+      s3-init: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
 
   celery-worker:
-    build:
-      context: ./backend
+    build: ./backend
     restart: unless-stopped
-    command: ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
+    command: ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info", "-Q", "document_processing"]
+    env_file: .env
     environment:
-      ENVIRONMENT: development
-      DATABASE_URL: postgresql+asyncpg://knowledgegpt:knowledgegpt@postgres:5432/knowledgegpt
-      REDIS_URL: redis://redis:6379/0
-      CLAMAV_HOST: clamav
-      CLAMAV_PORT: 3310
-      VIRUS_SCAN_ENABLED: "false"
-      RUN_MIGRATIONS: "false" # only the API container runs migrations
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-knowledgegpt-uploads-dev}
-      AWS_REGION: ${AWS_REGION:-us-east-1}
+      <<: *app-env
+      RUN_MIGRATIONS: "false"
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      backend: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.workers.celery_app inspect ping -d celery@$$HOSTNAME --timeout=5"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  celery-beat:
+    build: ./backend
+    restart: unless-stopped
+    command: ["celery", "-A", "app.workers.celery_app", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
+    env_file: .env
+    environment:
+      <<: *app-env
+      RUN_MIGRATIONS: "false"
+    depends_on:
+      backend: {condition: service_healthy}
+    healthcheck: {disable: true}
 
   frontend:
     build:
       context: ./frontend
       args:
-        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
     restart: unless-stopped
-    ports:
-      - "3000:3000"
+    ports: ["127.0.0.1:3000:3000"]
     depends_on:
-      - backend
+      backend: {condition: service_healthy}
 
 volumes:
   postgres_data:
+  redis_data:
+  minio_data:
+  clamav_data:

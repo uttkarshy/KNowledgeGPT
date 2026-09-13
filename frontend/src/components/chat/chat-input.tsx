@@ -34,6 +34,8 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
           onKeyDown={handleKeyDown}
           placeholder="Ask a question about your documents…"
           rows={1}
+          maxLength={600}
+          aria-label="Question about your documents"
           disabled={disabled}
           className="max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-ink-500"
         />
@@ -47,7 +49,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
         </button>
       </div>
       <p className="mt-1.5 px-1 font-mono text-[10px] text-ink-500">
-        KnowledgeGPT only answers from your uploaded documents and always cites its sources.
+        Answers use your document sources. Check the cited excerpts for accuracy.
       </p>
     </div>
   );

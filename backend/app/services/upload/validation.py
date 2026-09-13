@@ -11,6 +11,7 @@ Three layers, deliberately in this order (cheapest/least-trustworthy first):
 from __future__ import annotations
 
 import hashlib
+import zipfile
 from dataclasses import dataclass
 from typing import Optional
 
@@ -99,6 +100,8 @@ def validate_magic_bytes(file_path: str, declared_extension: str) -> Optional[st
     if kind is None:
         # Not detectable via magic bytes (txt/csv/md/json/xml/rtf/html) —
         # nothing to cross-check here.
+        if file_type in _SNIFFABLE_MATCHES:
+            raise FileValidationError("File signature does not match its declared format")
         return None
 
     expected = _SNIFFABLE_MATCHES.get(file_type)
@@ -126,6 +129,14 @@ def validate_uploaded_file(
     ext = validate_extension(filename, settings)
     validate_size(size_bytes, settings)
     validate_magic_bytes(file_path, ext)
+    if ext in {"docx", "xlsx", "pptx"}:
+        with zipfile.ZipFile(file_path) as archive:
+            members = archive.infolist()
+            if len(members) > 10000 or sum(x.file_size for x in members) > 100 * 1024 * 1024:
+                raise FileValidationError("Office archive exceeds safe extraction limits")
+            expected = {"docx": "word/document.xml", "xlsx": "xl/workbook.xml", "pptx": "ppt/presentation.xml"}[ext]
+            if expected not in archive.namelist():
+                raise FileValidationError("Invalid Office document structure")
     checksum = compute_checksum(file_path)
 
     return ValidationResult(

@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { apiFetch, apiJson } from "@/lib/api-client";
+import { apiJson } from "@/lib/api-client";
 import type { DocumentSummary } from "@/types";
 
 export function useDocuments(knowledgeBaseId: string | null) {
@@ -46,6 +46,9 @@ export function useUploadDocument(knowledgeBaseId: string | null) {
   const upload = async (file: File) => {
     if (!knowledgeBaseId) return;
     setError(null);
+    if (file.size > 25 * 1024 * 1024 || file.size === 0) {
+      setError("Choose a non-empty file up to 25 MB."); setStage("error"); return;
+    }
     setProgress(0);
 
     try {
@@ -76,6 +79,7 @@ export function useUploadDocument(knowledgeBaseId: string | null) {
       queryClient.invalidateQueries({ queryKey: ["documents", knowledgeBaseId] });
       queryClient.invalidateQueries({ queryKey: ["knowledge-bases"] });
     } catch (e) {
+      queryClient.invalidateQueries({ queryKey: ["documents", knowledgeBaseId] });
       setStage("error");
       setError(e instanceof Error ? e.message : "Upload failed");
     }
@@ -91,6 +95,8 @@ function uploadWithProgress(url: string, file: File, onProgress: (pct: number) =
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", url);
+    xhr.timeout = 120000;
+    xhr.ontimeout = () => reject(new Error("Upload timed out. Please try again."));
     xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
@@ -100,9 +106,3 @@ function uploadWithProgress(url: string, file: File, onProgress: (pct: number) =
     xhr.send(file);
   });
 }
-
-// apiFetch is imported for parity with the rest of the codebase's pattern
-// even though this hook uses apiJson for the two JSON legs; kept explicit
-// rather than re-exporting to avoid an unused-import lint warning silently
-// masking a real accidental removal later.
-void apiFetch;

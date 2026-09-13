@@ -28,9 +28,9 @@ def ocr_image(image: Image.Image, *, languages: list[str] | None = None) -> OCRR
     langs = languages or ["eng", "hin"]
     lang_str = "+".join(langs)
 
-    text = pytesseract.image_to_string(image, lang=lang_str)
+    text = pytesseract.image_to_string(image, lang=lang_str, timeout=30)
 
-    data = pytesseract.image_to_data(image, lang=lang_str, output_type=pytesseract.Output.DICT)
+    data = pytesseract.image_to_data(image, lang=lang_str, output_type=pytesseract.Output.DICT, timeout=30)
     confidences = [float(c) for c in data.get("conf", []) if c not in ("-1", -1)]
     mean_confidence = sum(confidences) / len(confidences) if confidences else 0.0
 

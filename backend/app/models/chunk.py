@@ -8,14 +8,13 @@ from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.config import get_settings
 from app.db.base_class import Base, TimestampMixin, UUIDPKMixin
 
 # The pgvector column dimension is fixed at table-definition time and MUST
 # match settings.LLM_EMBEDDING_DIMENSIONS for whichever embedding model is
 # configured. Changing embedding models to one with a different dimension
 # requires a migration (see alembic/versions/0002_change_embedding_dim.py.example).
-_EMBEDDING_DIM = get_settings().LLM_EMBEDDING_DIMENSIONS
+_EMBEDDING_DIM = 1536  # schema contract; changing this requires an explicit migration and re-embedding
 
 
 class DocumentChunk(Base, UUIDPKMixin, TimestampMixin):

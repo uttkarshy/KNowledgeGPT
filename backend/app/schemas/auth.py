@@ -10,6 +10,8 @@ _PASSWORD_MIN_LEN = 10
 
 
 def _validate_password_strength(password: str) -> str:
+    if len(password.encode("utf-8")) > 72:
+        raise ValueError("Password must be at most 72 UTF-8 bytes")
     if len(password) < _PASSWORD_MIN_LEN:
         raise ValueError(f"Password must be at least {_PASSWORD_MIN_LEN} characters")
     if not re.search(r"[A-Z]", password):
@@ -25,7 +27,7 @@ def _validate_password_strength(password: str) -> str:
 
 class RegisterRequest(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(max_length=72)
     full_name: Optional[str] = Field(default=None, max_length=255)
 
     @field_validator("password")
@@ -36,16 +38,16 @@ class RegisterRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(max_length=72)
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    refresh_token: str = Field(min_length=1, max_length=512)
 
 
 class TokenResponse(BaseModel):
     access_token: str
-    refresh_token: str
+    refresh_token: str = Field(min_length=1, max_length=512)
     token_type: str = "bearer"
     expires_in: int  # seconds, for the access token
 
@@ -65,7 +67,7 @@ class ForgotPasswordRequest(BaseModel):
 
 
 class ResetPasswordRequest(BaseModel):
-    token: str
+    token: str = Field(min_length=1, max_length=512)
     new_password: str
 
     @field_validator("new_password")
@@ -75,7 +77,7 @@ class ResetPasswordRequest(BaseModel):
 
 
 class VerifyEmailRequest(BaseModel):
-    token: str
+    token: str = Field(min_length=1, max_length=512)
 
 
 class GoogleAuthCallbackRequest(BaseModel):

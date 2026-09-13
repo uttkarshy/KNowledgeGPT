@@ -24,8 +24,8 @@ async def wait_for_db():
             await engine.dispose()
             return
         except Exception as e:  # noqa: BLE001
-            print(f"Database not ready (attempt {attempt}/{max_attempts}): {e}")
-            time.sleep(2)
+            print(f"Database not ready (attempt {attempt}/{max_attempts}, category={type(e).__name__})")
+            await asyncio.sleep(2)
     print("Database never became ready — exiting.")
     sys.exit(1)
 
@@ -41,5 +41,19 @@ if [ "$RUN_MIGRATIONS" = "true" ]; then
     alembic upgrade head
 fi
 
-echo "Starting: $@"
+python3 - <<'PYEOF'
+import asyncio
+from app.core.config import get_settings
+from app.db.session import engine
+from app.db.contract import check_embedding_contract
+async def check():
+    try:
+        async with engine.connect() as conn:
+            await check_embedding_contract(conn, get_settings())
+    finally:
+        await engine.dispose()
+asyncio.run(check())
+PYEOF
+
+echo "Starting application process"
 exec "$@"

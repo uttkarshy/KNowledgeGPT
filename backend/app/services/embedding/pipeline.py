@@ -14,25 +14,26 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import uuid
+from collections.abc import Awaitable, Callable
 
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.aws import delete_object
 from app.core.config import Settings
-from app.models.document import Document
 from app.models.chunk import DocumentChunk
+from app.models.document import Document
 from app.models.enums import DocumentStatus
 from app.models.knowledge_base import KnowledgeBase
 from app.schemas.llm import EmbeddingRequest
-from app.services.chunking.semantic_chunker import Chunk, chunk_document
+from app.services.chunking.semantic_chunker import Chunk, bound_chunk_bytes, chunk_document
 from app.services.extraction.registry import get_extractor
 from app.services.extraction.schemas import ExtractionError, UnsupportedFormatError
 from app.services.llm.base import LLMProvider
 
 logger = logging.getLogger(__name__)
 
-_EMBEDDING_BATCH_SIZE = 100  # keeps individual API calls within reasonable payload size
 
 
 class EmbeddingPipelineError(Exception):
@@ -50,6 +51,7 @@ async def process_document_embeddings(
     provider: LLMProvider,
     document_id: uuid.UUID,
     local_file_path: str,
+    on_progress: Callable[..., Awaitable[None]] | None = None,
 ) -> int:
     """Runs extraction -> chunking -> embedding -> storage for one document.
 
@@ -80,32 +82,42 @@ async def process_document_embeddings(
     document.language = extracted.detected_language
     document.status = DocumentStatus.CHUNKING
     document.processing_progress_pct = 50
-    await db.flush()
+    if on_progress:
+        await on_progress(str(document_id), status=DocumentStatus.CHUNKING, detail=None, progress=50)
 
     # ---------------- Chunking ----------------
-    chunks: list[Chunk] = chunk_document(extracted)
+    chunks: list[Chunk] = bound_chunk_bytes(chunk_document(extracted), settings.EMBEDDING_MAX_INPUT_BYTES)
     if not chunks:
         raise EmbeddingPipelineError("No extractable text content found in this document")
+    if len(chunks) > settings.MAX_CHUNKS_PER_DOCUMENT:
+        raise EmbeddingPipelineError("Document exceeds the chunk limit. Upload a smaller document.")
 
     document.status = DocumentStatus.EMBEDDING
     document.processing_progress_pct = 60
-    await db.flush()
+    if on_progress:
+        await on_progress(str(document_id), status=DocumentStatus.EMBEDDING, detail=None, progress=60)
+    # Idempotent recovery; all old/new chunks remain in one transaction.
+    await db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document.id))
 
     # ---------------- Embedding (batched) ----------------
     embedding_model = settings.LLM_EMBEDDING_MODEL
     stored_count = 0
 
-    for batch_start in range(0, len(chunks), _EMBEDDING_BATCH_SIZE):
-        batch = chunks[batch_start : batch_start + _EMBEDDING_BATCH_SIZE]
+    for batch_start in range(0, len(chunks), settings.EMBEDDING_BATCH_SIZE):
+        batch = chunks[batch_start : batch_start + settings.EMBEDDING_BATCH_SIZE]
         try:
             result = await provider.embed(EmbeddingRequest(texts=[c.text for c in batch]))
         except Exception as e:  # provider already normalizes its own exceptions
-            raise EmbeddingPipelineError(f"Embedding generation failed: {e}") from e
+            raise EmbeddingPipelineError("Embedding generation failed. Check provider health and retry.") from e
 
         if len(result.embeddings) != len(batch):
             raise EmbeddingPipelineError(
                 f"Embedding count mismatch: sent {len(batch)} texts, got {len(result.embeddings)} vectors back"
             )
+        if result.model != embedding_model or result.dimensions != settings.LLM_EMBEDDING_DIMENSIONS:
+            raise EmbeddingPipelineError("Embedding model/dimension does not match configuration")
+        if any(len(v) != settings.LLM_EMBEDDING_DIMENSIONS or not all(math.isfinite(x) for x in v) or not any(v) for v in result.embeddings):
+            raise EmbeddingPipelineError("Provider returned an invalid embedding vector")
 
         for i, chunk in enumerate(batch):
             db.add(
@@ -136,10 +148,10 @@ async def process_document_embeddings(
     document.status_detail = None
     document.processing_progress_pct = 100
 
-    kb = await db.get(KnowledgeBase, document.knowledge_base_id)
-    if kb:
-        kb.document_count += 1
-        kb.total_chunk_count += stored_count
+    await db.execute(update(KnowledgeBase).where(KnowledgeBase.id == document.knowledge_base_id).values(
+        document_count=KnowledgeBase.document_count + 1,
+        total_chunk_count=KnowledgeBase.total_chunk_count + stored_count,
+    ))
 
     await db.flush()
 
@@ -147,9 +159,6 @@ async def process_document_embeddings(
     # Only ever deleted here, after embeddings are durably written to the
     # DB session (flushed, about to be committed by the caller's `async with`
     # block) — never before, and never on a failure path.
-    if document.temp_storage_key:
-        s3_key = document.temp_storage_key
-        document.temp_storage_key = None
-        delete_object(settings=settings, key=s3_key)
+    # The worker deletes the original only AFTER this transaction commits.
 
     return stored_count

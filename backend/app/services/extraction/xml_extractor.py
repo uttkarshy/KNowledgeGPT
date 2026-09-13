@@ -22,7 +22,9 @@ _MAX_ELEMENTS = 5000
 class XMLExtractor(TextExtractor):
     def extract(self, file_path: str, *, settings: Settings) -> ExtractedDocument:
         try:
-            tree = etree.parse(file_path)
+            tree = etree.parse(file_path, parser=etree.XMLParser(resolve_entities=False, load_dtd=False, no_network=True, huge_tree=False))
+            if tree.docinfo.doctype:
+                raise ExtractionError("XML documents containing a DTD are not supported")
         except etree.XMLSyntaxError as e:
             raise ExtractionError(f"Could not parse XML: {e}") from e
 

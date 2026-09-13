@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.chunk import DocumentChunk
 from app.models.document import Document
+from app.models.enums import DocumentStatus
 
 
 @dataclass
@@ -50,6 +51,7 @@ async def similarity_search(
     knowledge_base_id: uuid.UUID,
     owner_id: uuid.UUID,
     query_embedding: list[float],
+    embedding_model: str,
     top_k: int = 8,
     min_similarity: float = 0.72,
     filters: RetrievalFilters | None = None,
@@ -74,6 +76,10 @@ async def similarity_search(
         .where(
             DocumentChunk.knowledge_base_id == knowledge_base_id,
             DocumentChunk.owner_id == owner_id,  # belt-and-suspenders tenant isolation
+            Document.owner_id == owner_id,
+            Document.knowledge_base_id == knowledge_base_id,
+            Document.status == DocumentStatus.COMPLETED,
+            DocumentChunk.embedding_model == embedding_model,
         )
     )
 

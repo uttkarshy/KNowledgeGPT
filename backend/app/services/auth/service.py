@@ -12,7 +12,7 @@ from typing import Optional
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.core.security import (
     create_access_token,
     generate_refresh_token,
@@ -64,6 +64,7 @@ async def register_user(
     if existing:
         raise EmailAlreadyRegisteredError(f"An account with email {email} already exists")
 
+    verification_token = generate_url_safe_token()
     user = User(
         email=email,
         hashed_password=hash_password(password),
@@ -71,12 +72,12 @@ async def register_user(
         role=UserRole.USER,
         auth_provider=AuthProvider.PASSWORD,
         is_verified=False,
-        email_verification_token=generate_url_safe_token(),
+        email_verification_token=hash_token(verification_token),
     )
     db.add(user)
     await db.flush()  # populate user.id without committing yet
 
-    await send_verification_email(settings, to=user.email, token=user.email_verification_token)
+    await send_verification_email(settings, to=user.email, token=verification_token)
     return user
 
 
@@ -104,9 +105,14 @@ async def get_or_create_google_user(
         user.last_login_at = datetime.now(timezone.utc)
         return user
 
+    if not google_info.email_verified:
+        raise InvalidCredentialsError("Google email must be verified")
+
     # Link by email if a password account already exists with this address.
     user = await db.scalar(select(User).where(User.email == google_info.email))
     if user:
+        if user.is_suspended or not user.is_active:
+            raise AccountSuspendedError("This account has been suspended")
         user.google_id = google_info.sub
         if google_info.email_verified:
             user.is_verified = True
@@ -168,7 +174,7 @@ async def rotate_refresh_token(
     a strong signal of theft/replay — all of that user's tokens are revoked
     as a precaution."""
     token_hash = hash_token(plaintext_refresh_token)
-    stored = await db.scalar(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
+    stored = await db.scalar(select(RefreshToken).where(RefreshToken.token_hash == token_hash).with_for_update())
 
     if not stored:
         raise InvalidOrExpiredTokenError("Refresh token not recognized")
@@ -179,6 +185,7 @@ async def rotate_refresh_token(
             .where(RefreshToken.user_id == stored.user_id, RefreshToken.revoked == False)  # noqa: E712
             .values(revoked=True)
         )
+        await db.commit()  # preserve revocation even though the route returns 401
         raise InvalidOrExpiredTokenError(
             "This refresh token was already used. All sessions have been revoked as a precaution."
         )
@@ -216,8 +223,8 @@ async def revoke_all_user_tokens(db: AsyncSession, *, user_id: uuid.UUID) -> Non
 # Email verification
 # ----------------------------------------------------------------------
 async def verify_email(db: AsyncSession, *, token: str) -> User:
-    user = await db.scalar(select(User).where(User.email_verification_token == token))
-    if not user:
+    user = await db.scalar(select(User).where(User.email_verification_token == hash_token(token)))
+    if not user or user.created_at + timedelta(hours=get_settings().EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS) < datetime.now(timezone.utc):
         raise InvalidOrExpiredTokenError("Invalid or expired verification token")
     user.is_verified = True
     user.email_verification_token = None
@@ -232,15 +239,16 @@ async def request_password_reset(db: AsyncSession, *, settings: Settings, email:
     if not user:
         # Deliberately do not reveal whether the email exists.
         return
-    user.password_reset_token = generate_url_safe_token()
+    reset_token = generate_url_safe_token()
+    user.password_reset_token = hash_token(reset_token)
     user.password_reset_expires_at = datetime.now(timezone.utc) + timedelta(
         minutes=settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES
     )
-    await send_password_reset_email(settings, to=user.email, token=user.password_reset_token)
+    await send_password_reset_email(settings, to=user.email, token=reset_token)
 
 
 async def confirm_password_reset(db: AsyncSession, *, token: str, new_password: str) -> User:
-    user = await db.scalar(select(User).where(User.password_reset_token == token))
+    user = await db.scalar(select(User).where(User.password_reset_token == hash_token(token)))
     if (
         not user
         or not user.password_reset_expires_at

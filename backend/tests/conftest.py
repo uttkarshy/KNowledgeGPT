@@ -4,5 +4,5 @@ import os
 # is evaluated at import time in several modules (e.g. chunk.py reads
 # LLM_EMBEDDING_DIMENSIONS for the pgvector column size).
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost:5432/test")
-os.environ.setdefault("LLM_EMBEDDING_DIMENSIONS", "8")
+os.environ.setdefault("LLM_EMBEDDING_DIMENSIONS", "1536")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-ci-only")

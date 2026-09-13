@@ -9,14 +9,15 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, status
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.auth import router as auth_router
 from app.api.admin import router as admin_router
+from app.api.auth import router as auth_router
 from app.api.chat import router as chat_router
+from app.api.deps import require_admin
 from app.api.documents import router as documents_router
 from app.api.knowledge_bases import router as knowledge_bases_router
 from app.core.config import get_settings
@@ -32,8 +33,16 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("KnowledgeGPT API starting up (environment=%s)", settings.ENVIRONMENT)
+    if settings.ENVIRONMENT == "production":
+        from app.db.contract import check_embedding_contract
+        async with engine.connect() as conn:
+            await check_embedding_contract(conn, settings)
     yield
     logger.info("KnowledgeGPT API shutting down")
+    from app.services.llm.factory import get_llm_provider
+    if get_llm_provider.cache_info().currsize:
+        await get_llm_provider().aclose()
+        get_llm_provider.cache_clear()
     await engine.dispose()
 
 
@@ -72,7 +81,7 @@ async def health_check():
 
 
 @app.get("/health/deep", tags=["system"])
-async def deep_health_check():
+async def deep_health_check(current_user=Depends(require_admin)):
     checks: dict[str, str] = {}
 
     try:
@@ -81,8 +90,8 @@ async def deep_health_check():
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
         checks["database"] = "ok"
-    except Exception as e:  # noqa: BLE001
-        checks["database"] = f"error: {e}"
+    except Exception:  # noqa: BLE001
+        checks["database"] = "unavailable"
 
     try:
         import redis.asyncio as redis
@@ -91,9 +100,16 @@ async def deep_health_check():
         await client.ping()
         await client.aclose()
         checks["redis"] = "ok"
-    except Exception as e:  # noqa: BLE001
-        checks["redis"] = f"error: {e}"
+    except Exception:  # noqa: BLE001
+        checks["redis"] = "unavailable"
 
+    try:
+        import asyncio
+
+        from app.services.llm.factory import get_llm_provider
+        checks["provider"] = "ok" if await asyncio.wait_for(get_llm_provider().health_check(), timeout=10) else "unavailable"
+    except Exception:
+        checks["provider"] = "unavailable"
     overall_ok = all(v == "ok" for v in checks.values())
     return JSONResponse(
         status_code=status.HTTP_200_OK if overall_ok else status.HTTP_503_SERVICE_UNAVAILABLE,

@@ -12,14 +12,15 @@ from alembic import op
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects import postgresql as pg
 
-from app.core.config import get_settings
 
 revision: str = "0001_initial_schema"
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-EMBEDDING_DIM = get_settings().LLM_EMBEDDING_DIMENSIONS
+# Freeze the original supported schema; migration DDL must not change with runtime env.
+# Existing installations are checked non-destructively by 0002.
+EMBEDDING_DIM = 1536
 
 
 def upgrade() -> None:

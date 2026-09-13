@@ -20,13 +20,13 @@ export default function DashboardPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [openDocsForKB, setOpenDocsForKB] = useState<string | null>(null);
 
-  const { data: knowledgeBases = [], isLoading } = useKnowledgeBases(search);
+  const { data: knowledgeBases = [], isLoading, error, refetch } = useKnowledgeBases(search);
   const archiveKB = useArchiveKnowledgeBase();
   const duplicateKB = useDuplicateKnowledgeBase();
   const deleteKB = useDeleteKnowledgeBase();
 
   return (
-    <main className="min-h-screen bg-mist-50 p-6 dark:bg-ink-950">
+    <main className="min-h-screen bg-mist-50 p-6 pt-14 dark:bg-ink-950">
       <div className="mx-auto max-w-6xl">
         <div className="flex items-center justify-between">
           <h1 className="font-display text-2xl text-ink-900 dark:text-mist-50">Knowledge bases</h1>
@@ -38,6 +38,8 @@ export default function DashboardPage() {
           </button>
         </div>
 
+        {isLoading && <p className="mt-4">Loading knowledge bases…</p>}
+        {(error || archiveKB.error || duplicateKB.error || deleteKB.error) && <div role="alert" className="mt-4 text-sm text-danger">{(error || archiveKB.error || duplicateKB.error || deleteKB.error)?.message} <button onClick={() => refetch()} className="underline">Retry</button></div>}
         <div className="mt-5">
           <StatsOverview knowledgeBases={knowledgeBases} />
         </div>
@@ -69,7 +71,7 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        {!isLoading && knowledgeBases.length === 0 && (
+        {!isLoading && !error && knowledgeBases.length === 0 && (
           <div className="mt-16 text-center">
             <p className="text-sm text-ink-500">
               No knowledge bases yet. Create one to start uploading documents.

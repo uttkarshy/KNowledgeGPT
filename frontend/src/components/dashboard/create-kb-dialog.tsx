@@ -21,7 +21,7 @@ export function CreateKBDialog({ open, onClose }: CreateKBDialogProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    await createKB.mutateAsync({ name: name.trim(), description: description.trim() || undefined, color });
+    try { await createKB.mutateAsync({ name: name.trim(), description: description.trim() || undefined, color }); } catch { return; }
     setName("");
     setDescription("");
     onClose();
@@ -33,6 +33,7 @@ export function CreateKBDialog({ open, onClose }: CreateKBDialogProps) {
         <h2 className="font-display text-lg text-ink-900 dark:text-mist-50">New knowledge base</h2>
 
         <form onSubmit={handleSubmit} className="mt-4">
+          {createKB.error && <p role="alert" className="mb-3 text-sm text-danger">{createKB.error.message}</p>}
           <label className="block text-sm font-medium text-ink-700 dark:text-mist-100">
             Name
             <input

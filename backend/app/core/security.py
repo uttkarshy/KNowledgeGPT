@@ -24,7 +24,7 @@ from typing import Optional
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from app.core.config import Settings
 
@@ -35,10 +35,14 @@ _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # Passwords
 # ----------------------------------------------------------------------
 def hash_password(plain_password: str) -> str:
+    if len(plain_password.encode("utf-8")) > 72:
+        raise ValueError("Password must be at most 72 UTF-8 bytes")
     return _pwd_context.hash(plain_password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
+    if len(plain_password.encode("utf-8")) > 72:
+        return False
     return _pwd_context.verify(plain_password, hashed_password)
 
 
@@ -92,7 +96,7 @@ def decode_access_token(token: str, settings: Settings) -> TokenPayload:
             if payload.type != TokenType.ACCESS.value:
                 raise InvalidTokenError("Token is not an access token")
             return payload
-        except JWTError as e:
+        except (JWTError, ValidationError) as e:
             last_error = e
             continue
     raise InvalidTokenError(f"Could not validate token: {last_error}")
