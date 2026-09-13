@@ -4,6 +4,7 @@ Host: python scripts/check_container_source.py
 Container: python /opt/knowledgegpt-scripts/check_container_source.py --inside
 """
 import argparse
+import contextlib
 import hashlib
 import importlib
 import json
@@ -22,7 +23,10 @@ def fingerprint():
     sys.path.insert(0, '/app')
     output = {}
     for name in MODULES:
-        path = Path(importlib.import_module(name).__file__)
+        # Some document libraries emit import notices on stdout. Keep the
+        # machine-readable fingerprint channel clean for PowerShell/CI.
+        with contextlib.redirect_stdout(sys.stderr):
+            path = Path(importlib.import_module(name).__file__)
         output[name] = hashlib.sha256(path.read_bytes()).hexdigest()
     return output
 
