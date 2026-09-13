@@ -18,7 +18,7 @@ x-app-env: &app-env
   GOOGLE_GEMINI_BASE_URL: ${GOOGLE_GEMINI_BASE_URL:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
-  JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-only-insecure-secret-change-me}
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Run scripts/start-local.ps1 to prepare .env}
   AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-knowledgegpt}
   AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-knowledgegpt-local-only}
   AWS_REGION: ${AWS_REGION:-us-east-1}
@@ -28,6 +28,9 @@ x-app-env: &app-env
   FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:3000}
   CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-["http://localhost:3000"]}
   REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-true}
+  CELERY_CONCURRENCY: ${CELERY_CONCURRENCY:-1}
+  DATABASE_POOL_SIZE: 5
+  DATABASE_MAX_OVERFLOW: 5
 
 services:
   postgres:
@@ -58,7 +61,7 @@ services:
       retries: 20
 
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:-knowledgegpt}
@@ -73,7 +76,7 @@ services:
       retries: 20
 
   s3-init:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
     depends_on:
       minio: {condition: service_healthy}
     environment:
@@ -99,6 +102,8 @@ services:
 
   backend:
     build: ./backend
+    command: ["gunicorn", "app.main:app", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--workers", "1", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-"]
+    volumes: ["./scripts:/opt/knowledgegpt-scripts:ro"]
     restart: unless-stopped
     env_file: .env
     environment:
@@ -118,6 +123,7 @@ services:
 
   celery-worker:
     build: ./backend
+    volumes: ["./scripts:/opt/knowledgegpt-scripts:ro"]
     restart: unless-stopped
     command: ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info", "-Q", "document_processing"]
     env_file: .env

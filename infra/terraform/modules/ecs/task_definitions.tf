@@ -29,9 +29,9 @@ resource "aws_ecs_task_definition" "backend" {
 
   container_definitions = jsonencode([
     {
-      name      = "backend"
-      image     = "${var.backend_ecr_url}:${var.backend_image_tag}"
-      essential = true
+      name         = "backend"
+      image        = "${var.backend_ecr_url}:${var.backend_image_tag}"
+      essential    = true
       portMappings = [{ containerPort = 8000, protocol = "tcp" }]
       environment = concat(local.backend_common_env, [
         { name = "RUN_MIGRATIONS", value = "true" }, # only the API task runs migrations, never the worker
@@ -91,9 +91,9 @@ resource "aws_ecs_task_definition" "frontend" {
 
   container_definitions = jsonencode([
     {
-      name      = "frontend"
-      image     = "${var.frontend_ecr_url}:${var.frontend_image_tag}"
-      essential = true
+      name         = "frontend"
+      image        = "${var.frontend_ecr_url}:${var.frontend_image_tag}"
+      essential    = true
       portMappings = [{ containerPort = 3000, protocol = "tcp" }]
       logConfiguration = {
         logDriver = "awslogs"

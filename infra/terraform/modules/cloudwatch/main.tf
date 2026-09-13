@@ -34,7 +34,7 @@ resource "aws_cloudwatch_log_metric_filter" "backend_errors" {
 resource "aws_cloudwatch_metric_alarm" "backend_error_rate" {
   alarm_name          = "${var.project_name}-backend-high-error-rate"
   comparison_operator = "GreaterThanThreshold"
-  evaluation_periods   = 2
+  evaluation_periods  = 2
   metric_name         = aws_cloudwatch_log_metric_filter.backend_errors.metric_transformation[0].name
   namespace           = var.project_name
   period              = 300

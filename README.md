@@ -1,3 +1,8 @@
+> **Launch recovery / local execution:** Gemini is the default provider. Follow
+> [the local validation guide](docs/local-validation.md) for the supported Windows/Docker
+> startup and real PDF acceptance test. AWS Terraform deployment remains stopped.
+> The older architecture/deployment sections below are historical; they do not authorize deployment.
+
 # Running KnowledgeGPT locally
 
 ## Prerequisites

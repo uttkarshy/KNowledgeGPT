@@ -25,10 +25,10 @@ resource "aws_elasticache_replication_group" "main" {
   engine_version = "7.1"
   node_type      = var.node_type
 
-  num_cache_clusters = 2 # primary + 1 replica for HA
+  num_cache_clusters         = 2 # primary + 1 replica for HA
   automatic_failover_enabled = true
 
-  subnet_group_name = aws_elasticache_subnet_group.main.name
+  subnet_group_name  = aws_elasticache_subnet_group.main.name
   security_group_ids = [var.security_group_id]
 
   at_rest_encryption_enabled = true

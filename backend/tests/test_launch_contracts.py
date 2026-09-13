@@ -20,8 +20,12 @@ from app.services.upload.validation import FileValidationError, validate_uploade
 
 
 def test_all_orm_enum_values_match_lowercase_migration_values():
-    for model, fields in [(User, ["role", "auth_provider"]), (Document, ["status", "file_type"]),
-                          (ChatMessage, ["role"]), (AuditLog, ["action"])]:
+    for model, fields in [
+        (User, ["role", "auth_provider"]),
+        (Document, ["status", "file_type"]),
+        (ChatMessage, ["role"]),
+        (AuditLog, ["action"]),
+    ]:
         for field in fields:
             values = model.__table__.c[field].type.enums
             assert all(v == v.lower() for v in values)
@@ -31,7 +35,7 @@ def test_all_orm_enum_values_match_lowercase_migration_values():
 
 
 def test_question_and_production_configuration_limits():
-    for question in [" ", "a"*601, "😀"*500]:
+    for question in [" ", "a" * 601, "😀" * 500]:
         with pytest.raises(ValidationError):
             AskQuestionRequest(question=question)
     with pytest.raises(ValidationError):
@@ -46,7 +50,9 @@ def test_real_pdf_extraction_and_bounded_chunks(tmp_path):
     document.save(path)
     document.close()
     settings = Settings()
-    validated = validate_uploaded_file(file_path=str(path), filename=path.name, size_bytes=path.stat().st_size, settings=settings)
+    validated = validate_uploaded_file(
+        file_path=str(path), filename=path.name, size_bytes=path.stat().st_size, settings=settings
+    )
     assert validated.file_type.value == "pdf"
     extracted = PDFExtractor().extract(str(path), settings=settings)
     chunks = bound_chunk_bytes(chunk_document(extracted), settings.EMBEDDING_MAX_INPUT_BYTES)
@@ -59,18 +65,31 @@ def test_fake_pdf_fails_magic_validation(tmp_path):
     path = tmp_path / "fake.pdf"
     path.write_text("This is not a PDF")
     with pytest.raises(FileValidationError):
-        validate_uploaded_file(file_path=str(path), filename=path.name, size_bytes=path.stat().st_size, settings=Settings())
+        validate_uploaded_file(
+            file_path=str(path), filename=path.name, size_bytes=path.stat().st_size, settings=Settings()
+        )
 
 
 @pytest.mark.asyncio
 async def test_retrieval_query_scopes_owner_kb_model_and_completed_documents():
     owner, kb = uuid.uuid4(), uuid.uuid4()
+
     class Result:
-        def all(self): return []
+        def all(self):
+            return []
+
     db = AsyncMock()
     db.execute.return_value = Result()
-    assert await similarity_search(db, owner_id=owner, knowledge_base_id=kb,
-                                   query_embedding=[0.1]*1536, embedding_model="gemini-embedding-001") == []
+    assert (
+        await similarity_search(
+            db,
+            owner_id=owner,
+            knowledge_base_id=kb,
+            query_embedding=[0.1] * 1536,
+            embedding_model="gemini-embedding-001",
+        )
+        == []
+    )
     stmt = db.execute.call_args.args[0]
     sql = str(stmt.compile(dialect=postgresql.dialect()))
     values = stmt.compile().params
@@ -83,7 +102,9 @@ async def test_retrieval_query_scopes_owner_kb_model_and_completed_documents():
 @pytest.mark.parametrize("reply,infected", [(b"stream: OK\0", False), (b"stream: Eicar-Test-Signature FOUND\0", True)])
 def test_clamav_null_terminated_response(tmp_path, monkeypatch, reply, infected):
     from unittest.mock import MagicMock
-    from app.services.upload.virus_scan import scan_file, VirusFoundError
+
+    from app.services.upload.virus_scan import VirusFoundError, scan_file
+
     path = tmp_path / "payload.txt"
     path.write_text("test bytes")
     socket = MagicMock()
@@ -91,14 +112,17 @@ def test_clamav_null_terminated_response(tmp_path, monkeypatch, reply, infected)
     socket.__enter__.return_value = socket
     monkeypatch.setattr("app.services.upload.virus_scan.socket.create_connection", lambda *a, **kw: socket)
     if infected:
-        with pytest.raises(VirusFoundError): scan_file(file_path=str(path), settings=Settings())
+        with pytest.raises(VirusFoundError):
+            scan_file(file_path=str(path), settings=Settings())
     else:
         scan_file(file_path=str(path), settings=Settings())
 
 
 def test_xml_external_entities_are_rejected(tmp_path):
-    from app.services.extraction.xml_extractor import XMLExtractor
     from app.services.extraction.schemas import ExtractionError
+    from app.services.extraction.xml_extractor import XMLExtractor
+
     path = tmp_path / "external.xml"
     path.write_text('<!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><x>&e;</x>')
-    with pytest.raises(ExtractionError): XMLExtractor().extract(str(path), settings=Settings())
+    with pytest.raises(ExtractionError):
+        XMLExtractor().extract(str(path), settings=Settings())

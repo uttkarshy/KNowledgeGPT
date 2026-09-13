@@ -112,6 +112,7 @@ jobs:
       - name: Local environment and Compose config
         run: |
           cp .env.example .env
+          python -c "import secrets; p='.env'; s=open(p).read(); open(p,'w').write(s.replace('JWT_SECRET_KEY=', 'JWT_SECRET_KEY='+secrets.token_hex(32)))"
           docker compose config --quiet
       - name: Clean Docker build
         run: |
@@ -121,6 +122,9 @@ jobs:
         run: |
           docker compose -p knowledgegpt-ci up -d --wait --wait-timeout 900
           python scripts/check_container_source.py --project knowledgegpt-ci
+      - name: Service diagnostics on failure
+        if: failure()
+        run: docker compose -p knowledgegpt-ci logs --no-color --tail=120
       - name: Cleanup
         if: always()
         run: docker compose -p knowledgegpt-ci down -v --remove-orphans

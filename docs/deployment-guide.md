@@ -1,3 +1,6 @@
+> Current local setup and acceptance commands: [local-validation.md](local-validation.md).
+> Production deployment is paused; do not run Terraform for this milestone.
+
 # Deployment Guide
 
 ## Local (Docker Compose)

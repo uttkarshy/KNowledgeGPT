@@ -30,7 +30,7 @@ resource "aws_appautoscaling_policy" "backend_cpu" {
 # CPU/IO-heavy, so this is a more direct signal here than for the API.
 resource "aws_appautoscaling_target" "worker" {
   max_capacity       = 10
-  min_capacity        = 2
+  min_capacity       = 2
   resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.worker.name}"
   scalable_dimension = "ecs:service:DesiredCount"
   service_namespace  = "ecs"

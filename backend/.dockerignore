@@ -4,6 +4,9 @@ __pycache__
 .venv
 venv
 .env
+.env.*
+!.env.example
+artifacts
 .git
 .pytest_cache
 .mypy_cache

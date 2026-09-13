@@ -16,12 +16,12 @@ module "storage" {
 }
 
 module "database" {
-  source              = "../../modules/database"
-  project_name        = var.project_name
-  private_subnet_ids  = module.network.private_subnet_ids
-  security_group_id   = module.security.rds_sg_id
-  instance_class      = var.db_instance_class
-  master_password     = var.db_master_password
+  source             = "../../modules/database"
+  project_name       = var.project_name
+  private_subnet_ids = module.network.private_subnet_ids
+  security_group_id  = module.security.rds_sg_id
+  instance_class     = var.db_instance_class
+  master_password    = var.db_master_password
 }
 
 module "cache" {
@@ -46,12 +46,12 @@ module "ecr" {
 }
 
 module "alb" {
-  source               = "../../modules/alb"
-  project_name         = var.project_name
-  vpc_id               = module.network.vpc_id
-  public_subnet_ids    = module.network.public_subnet_ids
-  security_group_id    = module.security.alb_sg_id
-  acm_certificate_arn  = var.acm_certificate_arn
+  source              = "../../modules/alb"
+  project_name        = var.project_name
+  vpc_id              = module.network.vpc_id
+  public_subnet_ids   = module.network.public_subnet_ids
+  security_group_id   = module.security.alb_sg_id
+  acm_certificate_arn = var.acm_certificate_arn
 }
 
 module "cloudwatch" {
@@ -63,12 +63,12 @@ module "github_oidc" {
   count  = var.github_repo != "" ? 1 : 0
   source = "../../modules/github_oidc"
 
-  project_name                 = var.project_name
-  github_repo                  = var.github_repo
-  backend_ecr_arn              = module.ecr.backend_repository_arn
-  frontend_ecr_arn             = module.ecr.frontend_repository_arn
-  ecs_task_execution_role_arn  = module.ecs.task_execution_role_arn
-  ecs_task_role_arn            = module.ecs.task_role_arn
+  project_name                = var.project_name
+  github_repo                 = var.github_repo
+  backend_ecr_arn             = module.ecr.backend_repository_arn
+  frontend_ecr_arn            = module.ecr.frontend_repository_arn
+  ecs_task_execution_role_arn = module.ecs.task_execution_role_arn
+  ecs_task_role_arn           = module.ecs.task_role_arn
 }
 
 module "ecs" {
@@ -81,10 +81,10 @@ module "ecs" {
   ecs_service_sg_id  = module.security.ecs_service_sg_id
   ecs_worker_sg_id   = module.security.ecs_worker_sg_id
 
-  backend_ecr_url     = module.ecr.backend_repository_url
-  frontend_ecr_url    = module.ecr.frontend_repository_url
-  backend_image_tag   = var.backend_image_tag
-  frontend_image_tag  = var.frontend_image_tag
+  backend_ecr_url    = module.ecr.backend_repository_url
+  frontend_ecr_url   = module.ecr.frontend_repository_url
+  backend_image_tag  = var.backend_image_tag
+  frontend_image_tag = var.frontend_image_tag
 
   backend_target_group_arn  = module.alb.backend_target_group_arn
   frontend_target_group_arn = module.alb.frontend_target_group_arn

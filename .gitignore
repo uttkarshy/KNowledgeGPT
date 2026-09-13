@@ -21,3 +21,6 @@ htmlcov/
 *.zip
 # Local acceptance evidence
 artifacts/
+
+# Generated local browser acceptance fixture
+knowledgegpt-golden-path.pdf
