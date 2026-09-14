@@ -102,6 +102,10 @@ def validate_magic_bytes(file_path: str, declared_extension: str) -> Optional[st
         # nothing to cross-check here.
         if file_type in _SNIFFABLE_MATCHES:
             raise FileValidationError("File signature does not match its declared format")
+        with open(file_path, "rb") as source:
+            sample = source.read(8192)
+        if b"\x00" in sample or any(b < 32 and b not in (9, 10, 13) for b in sample):
+            raise FileValidationError("Binary content is not allowed in a text upload")
         return None
 
     expected = _SNIFFABLE_MATCHES.get(file_type)
@@ -110,6 +114,8 @@ def validate_magic_bytes(file_path: str, declared_extension: str) -> Optional[st
             f"File content does not match its '.{declared_extension}' extension "
             f"(detected: {kind.mime})"
         )
+    if expected is None:
+        raise FileValidationError("Binary content is not allowed in a text upload")
     return kind.extension
 
 

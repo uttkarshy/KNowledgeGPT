@@ -82,7 +82,7 @@ async def register_user(
 
 
 async def authenticate_user(db: AsyncSession, *, email: str, password: str) -> User:
-    user = await db.scalar(select(User).where(User.email == email))
+    user = await db.scalar(select(User).where(User.email == email).with_for_update())
     if not user or not user.hashed_password or not verify_password(password, user.hashed_password):
         raise InvalidCredentialsError("Incorrect email or password")
     if user.is_suspended or not user.is_active:
@@ -140,13 +140,14 @@ async def get_or_create_google_user(
 async def issue_token_pair(
     db: AsyncSession, *, user: User, settings: Settings, user_agent: Optional[str], ip_address: Optional[str]
 ) -> TokenPair:
-    access_token = create_access_token(user_id=user.id, role=user.role.value, settings=settings)
+    access_token = create_access_token(user_id=user.id, role=user.role.value, settings=settings, token_version=user.token_version)
 
     plaintext_refresh, refresh_hash = generate_refresh_token()
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     db.add(
         RefreshToken(
             user_id=user.id,
+            token_version=user.token_version,
             token_hash=refresh_hash,
             expires_at=expires_at,
             user_agent=user_agent,
@@ -174,10 +175,17 @@ async def rotate_refresh_token(
     a strong signal of theft/replay — all of that user's tokens are revoked
     as a precaution."""
     token_hash = hash_token(plaintext_refresh_token)
-    stored = await db.scalar(select(RefreshToken).where(RefreshToken.token_hash == token_hash).with_for_update())
+    # Lock user before refresh row, matching reset's order. Concurrent reset
+    # and rotation must not mint a successor in the new session epoch.
+    user_id = await db.scalar(select(RefreshToken.user_id).where(RefreshToken.token_hash == token_hash))
+    user = await db.scalar(select(User).where(User.id == user_id).with_for_update().execution_options(populate_existing=True))
+    stored = await db.scalar(select(RefreshToken).where(RefreshToken.token_hash == token_hash).with_for_update().execution_options(populate_existing=True))
 
     if not stored:
         raise InvalidOrExpiredTokenError("Refresh token not recognized")
+
+    if user is None or stored.token_version != user.token_version:
+        raise InvalidOrExpiredTokenError("Session revoked by password reset")
 
     if stored.revoked:
         await db.execute(
@@ -193,7 +201,6 @@ async def rotate_refresh_token(
     if stored.expires_at < datetime.now(timezone.utc):
         raise InvalidOrExpiredTokenError("Refresh token has expired")
 
-    user = await db.get(User, stored.user_id)
     if not user or user.is_suspended or not user.is_active:
         raise AccountSuspendedError("This account has been suspended")
 
@@ -248,7 +255,7 @@ async def request_password_reset(db: AsyncSession, *, settings: Settings, email:
 
 
 async def confirm_password_reset(db: AsyncSession, *, token: str, new_password: str) -> User:
-    user = await db.scalar(select(User).where(User.password_reset_token == hash_token(token)))
+    user = await db.scalar(select(User).where(User.password_reset_token == hash_token(token)).with_for_update().execution_options(populate_existing=True))
     if (
         not user
         or not user.password_reset_expires_at
@@ -256,6 +263,7 @@ async def confirm_password_reset(db: AsyncSession, *, token: str, new_password: 
     ):
         raise InvalidOrExpiredTokenError("Invalid or expired password reset token")
 
+    user.token_version += 1
     user.hashed_password = hash_password(new_password)
     user.password_reset_token = None
     user.password_reset_expires_at = None

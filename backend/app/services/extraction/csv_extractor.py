@@ -34,8 +34,7 @@ class CSVExtractor(TextExtractor):
                 reader = csv.reader(f, dialect)
                 for i, row in enumerate(reader):
                     if i >= _MAX_ROWS:
-                        rows_text.append(f"... (truncated after {_MAX_ROWS} rows)")
-                        break
+                        raise ExtractionError(f"CSV exceeds {_MAX_ROWS} rows; split the file before uploading")
                     if any(cell.strip() for cell in row):
                         rows_text.append(" | ".join(row))
         except OSError as e:

@@ -3,7 +3,7 @@ Password hashing + JWT primitives.
 
 Design notes:
   - Access tokens are short-lived signed JWTs (claims: sub, role, type, jti, exp).
-    They are never stored server-side — verification is pure signature check.
+    They are never stored server-side — authentication also checks the user token version in the database.
   - Refresh tokens are OPAQUE random strings, not JWTs. Only their SHA-256
     hash is persisted (RefreshToken.token_hash), so a stolen DB dump can't be
     used to mint sessions, and revocation/rotation is a simple DB update
@@ -61,17 +61,19 @@ class TokenPayload(BaseModel):
     jti: str
     exp: int
     iat: int
+    token_version: int = 0  # legacy JWTs belong to the initial session epoch
 
 
 class InvalidTokenError(Exception):
     pass
 
 
-def create_access_token(*, user_id: uuid.UUID, role: str, settings: Settings) -> str:
+def create_access_token(*, user_id: uuid.UUID, role: str, settings: Settings, token_version: int = 0) -> str:
     now = datetime.now(timezone.utc)
     expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {
         "sub": str(user_id),
+        "token_version": token_version,
         "role": role,
         "type": TokenType.ACCESS.value,
         "jti": secrets.token_hex(16),

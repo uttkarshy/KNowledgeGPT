@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -14,6 +14,8 @@ from app.models.enums import AuthProvider, UserRole
 
 class User(Base, UUIDPKMixin, TimestampMixin):
     __tablename__ = "users"
+
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
     email: Mapped[str] = mapped_column(
         String(320),
@@ -113,6 +115,8 @@ class RefreshToken(Base, UUIDPKMixin, TimestampMixin):
     """
 
     __tablename__ = "refresh_tokens"
+
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

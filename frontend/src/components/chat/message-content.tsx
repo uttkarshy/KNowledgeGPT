@@ -3,6 +3,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
+import { rehypeCitations } from "./rehype-citations";
 import { CitationChip } from "@/components/chat/citation-chip";
 import type { Citation } from "@/types";
 
@@ -13,52 +14,24 @@ interface MessageContentProps {
   onCitationClick: (index: number) => void;
 }
 
-const CITATION_MARKER_RE = /\[(\d+)\]/g;
-
-/**
- * Splits the message text on [N] citation markers and interleaves
- * markdown-rendered text segments with CitationChip buttons.
- *
- * Known limitation: this splits at the whole-message level before markdown
- * parsing, so a citation marker that falls INSIDE a bold/italic run or a
- * table cell (rare in practice — models place citations at claim/sentence
- * boundaries) may render awkwardly. Good enough for v1; a proper fix would
- * be a custom remark plugin operating on the parsed AST instead of raw text.
- */
+/** Parse the whole answer before inserting interactive citation markers. */
 export function MessageContent({ content, citations, activeCitationIndex, onCitationClick }: MessageContentProps) {
-  const parts = content.split(CITATION_MARKER_RE);
-
   return (
     <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-2 prose-headings:font-display">
-      {parts.map((part, i) => {
-        // Odd indices are the captured citation numbers (from String.split
-        // with a capturing group regex); even indices are plain text.
-        if (i % 2 === 1) {
-          const index = parseInt(part, 10);
-          if (citations.length > 0 && index >= 1 && index <= citations.length) {
-            return (
-              <CitationChip
-                key={i}
-                index={index}
-                isActive={activeCitationIndex === index}
-                onClick={() => onCitationClick(index)}
-              />
-            );
-          }
-          return <span key={i}>[{part}]</span>;
-        }
-        if (!part) return null;
-        return (
-          <ReactMarkdown
-            key={i}
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeHighlight]}
-            components={{ p: ({ children }) => <span>{children} </span> }}
-          >
-            {part}
-          </ReactMarkdown>
-        );
-      })}
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeHighlight, [rehypeCitations, { count: citations.length }]]}
+        components={{
+          span: ({ node, children, ...props }) => {
+            const index = Number(node?.properties["data-citation"]);
+            return Number.isInteger(index) && index >= 1 && index <= citations.length ? (
+              <CitationChip index={index} isActive={activeCitationIndex === index} onClick={() => onCitationClick(index)} />
+            ) : <span {...props}>{children}</span>;
+          },
+        }}
+      >
+        {content}
+      </ReactMarkdown>
     </div>
   );
 }

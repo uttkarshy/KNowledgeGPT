@@ -74,6 +74,10 @@ jobs:
         working-directory: frontend
         run: npm run lint
 
+      - name: Frontend regression tests
+        working-directory: frontend
+        run: npm test
+
       - name: Type-check + build
         working-directory: frontend
         env:

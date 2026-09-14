@@ -28,6 +28,7 @@ from app.models.usage import ApiUsageLog
 from app.schemas.llm import ChatMessage, LLMCompletionRequest, MessageRole
 from app.services.llm.base import LLMProvider
 from app.services.rag.context_compression import compress_context
+from app.services.rag.exact_date import DateEvidenceLimit, augment_date_context, exact_date_evidence, explicit_date
 from app.services.rag.prompt_assembly import assemble_messages
 from app.services.rag.retrieval import RetrievalFilters, RetrievedChunk, similarity_search
 
@@ -98,6 +99,23 @@ async def answer_question(
     db.add(user_message)
     await db.flush()
 
+    date_context = None
+    limitation = None
+    try:
+        target = explicit_date(question)
+        if target:
+            date_context = await exact_date_evidence(db, target=target, owner_id=session.owner_id,
+                                                    knowledge_base_id=session.knowledge_base_id, filters=filters)
+    except DateEvidenceLimit as exc:
+        limitation = str(exc)
+    if limitation:
+        message = ChatMessageModel(session_id=session.id, role=DBMessageRole.ASSISTANT,
+                                   content=limitation, confidence_score=0.0)
+        db.add(message)
+        await db.flush()
+        yield RAGStreamEvent(type="no_answer", delta=limitation, message_id=message.id, confidence=0.0)
+        return
+
     # ---------------- Embed the question ----------------
     try:
         from app.schemas.llm import EmbeddingRequest
@@ -123,6 +141,9 @@ async def answer_question(
         filters=filters,
     )
 
+    if date_context is not None:
+        chunks = augment_date_context(date_context, chunks) if date_context else []
+
     if not chunks:
         assistant_message = ChatMessageModel(
             session_id=session.id,
@@ -142,7 +163,7 @@ async def answer_question(
         )
         return
 
-    context_chunks = compress_context(chunks, max_context_tokens=3000)
+    context_chunks = chunks if date_context is not None else compress_context(chunks, max_context_tokens=3000)
     messages = assemble_messages(question=question, chunks=context_chunks, conversation_history=history)
 
     # ---------------- Stream the completion ----------------

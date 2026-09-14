@@ -52,63 +52,64 @@ class XLSXExtractor(TextExtractor):
 
         pages: list[ExtractedPage] = []
 
-        for sheet_index, sheet in enumerate(workbook.worksheets):
-            sheet_number = sheet_index + 1
-            blocks: list[ExtractedBlock] = [
-                ExtractedBlock(
-                    kind=SectionKind.HEADING, text=sheet.title, heading_level=1,
-                    page_number=sheet_number, section_title=sheet.title,
-                )
-            ]
-
-            header_cells: list[str] | None = None
-            header_tokens = 0
-            current_rows: list[str] = []
-            current_tokens = 0
-
-            def flush_block(rows, header, output, page_number, title):
-                if not rows:
-                    return
-                # Repeat the header in every block so each chunk is
-                # independently interpretable by the LLM at retrieval
-                # time — a block of bare data rows with no column names
-                # is far less useful than one that carries them.
-                text_parts = [_header_line(header)] if header else []
-                text_parts.extend(rows)
-                output.append(
+        try:
+            for sheet_index, sheet in enumerate(workbook.worksheets):
+                sheet_number = sheet_index + 1
+                blocks: list[ExtractedBlock] = [
                     ExtractedBlock(
-                        kind=SectionKind.TABLE, text="\n".join(text_parts),
-                        page_number=page_number, section_title=title,
+                        kind=SectionKind.HEADING, text=sheet.title, heading_level=1,
+                        page_number=sheet_number, section_title=sheet.title,
                     )
-                )
+                ]
 
-            for row_index, row in enumerate(sheet.iter_rows(values_only=True)):
-                if row_index >= _MAX_ROWS_PER_SHEET:
-                    current_rows.append(f"... (truncated after {_MAX_ROWS_PER_SHEET} rows)")
-                    break
+                header_cells: list[str] | None = None
+                header_tokens = 0
+                current_rows: list[str] = []
+                current_tokens = 0
 
-                cells = ["" if v is None else str(v) for v in row]
-                if not any(c.strip() for c in cells):
-                    continue
+                def flush_block(rows, header, output, page_number, title):
+                    if not rows:
+                        return
+                    # Repeat the header in every block so each chunk is
+                    # independently interpretable by the LLM at retrieval
+                    # time — a block of bare data rows with no column names
+                    # is far less useful than one that carries them.
+                    text_parts = [_header_line(header)] if header else []
+                    text_parts.extend(rows)
+                    output.append(
+                        ExtractedBlock(
+                            kind=SectionKind.TABLE, text="\n".join(text_parts),
+                            page_number=page_number, section_title=title,
+                        )
+                    )
 
-                if header_cells is None:
-                    header_cells = cells
-                    header_tokens = estimate_tokens(_header_line(header_cells))
-                    continue
+                for row_index, row in enumerate(sheet.iter_rows(values_only=True)):
+                    if row_index >= _MAX_ROWS_PER_SHEET:
+                        raise ExtractionError(f"Spreadsheet exceeds {_MAX_ROWS_PER_SHEET} rows per sheet; split the file before uploading")
 
-                row_line = " | ".join(cells)
-                row_tokens = estimate_tokens(row_line)
+                    cells = ["" if v is None else str(v) for v in row]
+                    if not any(c.strip() for c in cells):
+                        continue
 
-                if current_rows and (current_tokens + row_tokens + header_tokens > _MAX_TOKENS_PER_BLOCK):
-                    flush_block(current_rows, header_cells, blocks, sheet_number, sheet.title)
-                    current_rows = []
-                    current_tokens = 0
+                    if header_cells is None:
+                        header_cells = cells
+                        header_tokens = estimate_tokens(_header_line(header_cells))
+                        continue
 
-                current_rows.append(row_line)
-                current_tokens += row_tokens
+                    row_line = " | ".join(cells)
+                    row_tokens = estimate_tokens(row_line)
 
-            flush_block(current_rows, header_cells, blocks, sheet_number, sheet.title)
-            pages.append(ExtractedPage(page_number=sheet_number, blocks=blocks, was_ocr=False))
+                    if current_rows and (current_tokens + row_tokens + header_tokens > _MAX_TOKENS_PER_BLOCK):
+                        flush_block(current_rows, header_cells, blocks, sheet_number, sheet.title)
+                        current_rows = []
+                        current_tokens = 0
 
-        workbook.close()
+                    current_rows.append(row_line)
+                    current_tokens += row_tokens
+
+                flush_block(current_rows, header_cells, blocks, sheet_number, sheet.title)
+                pages.append(ExtractedPage(page_number=sheet_number, blocks=blocks, was_ocr=False))
+
+        finally:
+            workbook.close()
         return ExtractedDocument(pages=pages, detected_language=None, page_count=len(pages))
