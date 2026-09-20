@@ -28,8 +28,16 @@ from app.models.usage import ApiUsageLog
 from app.schemas.llm import ChatMessage, LLMCompletionRequest, MessageRole
 from app.services.llm.base import LLMProvider
 from app.services.rag.context_compression import compress_context
-from app.services.rag.exact_date import DateEvidenceLimit, augment_date_context, exact_date_evidence, explicit_date
+from app.services.rag.exact_date import (
+    MAX_CONTEXT_TOKENS,
+    DateEvidenceLimit,
+    augment_date_context,
+    context_cost,
+    exact_date_evidence,
+)
+from app.services.rag.exhaustive import calculate, evidence, narrow
 from app.services.rag.prompt_assembly import assemble_messages
+from app.services.rag.query_router import route
 from app.services.rag.retrieval import RetrievalFilters, RetrievedChunk, similarity_search
 
 logger = logging.getLogger(__name__)
@@ -99,10 +107,24 @@ async def answer_question(
     db.add(user_message)
     await db.flush()
 
+    direct_answer = None
+    special_context = None
     date_context = None
     limitation = None
     try:
-        target = explicit_date(question)
+        plan = route(question)
+        filters = await narrow(db, owner_id=session.owner_id, kb_id=session.knowledge_base_id, filters=filters, filename=plan.filename)
+        target = plan.target
+        if plan.strategy in ('analytical', 'lexical'):
+            special_context = await evidence(db, owner_id=session.owner_id, kb_id=session.knowledge_base_id,
+                                             filters=filters, lexical=question if plan.strategy == 'lexical' else None)
+            if plan.financial:
+                direct_answer, special_context = calculate(special_context, plan, question)
+            elif context_cost(special_context) > MAX_CONTEXT_TOKENS:
+                raise DateEvidenceLimit('Complete evidence exceeds the safe context limit. Select fewer documents.')
+        elif plan.strategy == 'row':
+            raise DateEvidenceLimit('Reliable structured rows are required for this lookup. Use a clear table or structured export; missing cells will not be guessed.')
+        logger.info('retrieval_strategy=%s', plan.strategy)
         if target:
             date_context = await exact_date_evidence(db, target=target, owner_id=session.owner_id,
                                                     knowledge_base_id=session.knowledge_base_id, filters=filters)
@@ -116,33 +138,36 @@ async def answer_question(
         yield RAGStreamEvent(type="no_answer", delta=limitation, message_id=message.id, confidence=0.0)
         return
 
-    # ---------------- Embed the question ----------------
-    try:
-        from app.schemas.llm import EmbeddingRequest
+    if special_context is not None:
+        chunks = special_context
+    else:
+        # ---------------- Embed the question ----------------
+        try:
+            from app.schemas.llm import EmbeddingRequest
 
-        embed_result = await provider.embed(EmbeddingRequest(texts=[question], task_type="RETRIEVAL_QUERY"))
-        if embed_result.dimensions != settings.LLM_EMBEDDING_DIMENSIONS or embed_result.model != settings.LLM_EMBEDDING_MODEL or len(embed_result.embeddings) != 1:
-            raise ValueError("Embedding contract mismatch")
-        query_embedding = embed_result.embeddings[0]
-    except Exception as e:
-        logger.warning("question_embedding_failed session=%s category=%s", session.id, type(e).__name__)
-        yield RAGStreamEvent(type="error", error="Could not process your question. Please retry or contact support.")
-        return
+            embed_result = await provider.embed(EmbeddingRequest(texts=[question], task_type="RETRIEVAL_QUERY"))
+            if embed_result.dimensions != settings.LLM_EMBEDDING_DIMENSIONS or embed_result.model != settings.LLM_EMBEDDING_MODEL or len(embed_result.embeddings) != 1:
+                raise ValueError("Embedding contract mismatch")
+            query_embedding = embed_result.embeddings[0]
+        except Exception as e:
+            logger.warning("question_embedding_failed session=%s category=%s", session.id, type(e).__name__)
+            yield RAGStreamEvent(type="error", error="Could not process your question. Please retry or contact support.")
+            return
 
-    # ---------------- Retrieve ----------------
-    chunks: list[RetrievedChunk] = await similarity_search(
-        db,
-        knowledge_base_id=session.knowledge_base_id,
-        owner_id=session.owner_id,
-        query_embedding=query_embedding,
-        embedding_model=settings.LLM_EMBEDDING_MODEL,
-        top_k=settings.RAG_TOP_K,
-        min_similarity=settings.RAG_MIN_SIMILARITY,
-        filters=filters,
-    )
+        # ---------------- Retrieve ----------------
+        chunks: list[RetrievedChunk] = await similarity_search(
+            db,
+            knowledge_base_id=session.knowledge_base_id,
+            owner_id=session.owner_id,
+            query_embedding=query_embedding,
+            embedding_model=settings.LLM_EMBEDDING_MODEL,
+            top_k=settings.RAG_TOP_K,
+            min_similarity=settings.RAG_MIN_SIMILARITY,
+            filters=filters,
+        )
 
-    if date_context is not None:
-        chunks = augment_date_context(date_context, chunks) if date_context else []
+        if date_context is not None:
+            chunks = augment_date_context(date_context, chunks) if date_context else []
 
     if not chunks:
         assistant_message = ChatMessageModel(
@@ -163,24 +188,28 @@ async def answer_question(
         )
         return
 
-    context_chunks = chunks if date_context is not None else compress_context(chunks, max_context_tokens=3000)
+    context_chunks = chunks if date_context is not None or special_context is not None else compress_context(chunks, max_context_tokens=3000)
     messages = assemble_messages(question=question, chunks=context_chunks, conversation_history=history)
 
     # ---------------- Stream the completion ----------------
     full_text_parts: list[str] = []
     input_tokens = output_tokens = 0
-    try:
-        async for stream_chunk in provider.stream(LLMCompletionRequest(messages=messages, stream=True)):
-            if stream_chunk.delta:
-                full_text_parts.append(stream_chunk.delta)
-                yield RAGStreamEvent(type="delta", delta=stream_chunk.delta)
-            if stream_chunk.done and stream_chunk.usage:
-                input_tokens = stream_chunk.usage.input_tokens
-                output_tokens = stream_chunk.usage.output_tokens
-    except Exception as e:
-        logger.warning("chat_provider_failed session=%s category=%s", session.id, type(e).__name__)
-        yield RAGStreamEvent(type="error", error="The model is temporarily unavailable. Please retry.")
-        return
+    if direct_answer is not None:
+        full_text_parts.append(direct_answer)
+        yield RAGStreamEvent(type='delta', delta=direct_answer)
+    else:
+        try:
+            async for stream_chunk in provider.stream(LLMCompletionRequest(messages=messages, stream=True)):
+                if stream_chunk.delta:
+                    full_text_parts.append(stream_chunk.delta)
+                    yield RAGStreamEvent(type="delta", delta=stream_chunk.delta)
+                if stream_chunk.done and stream_chunk.usage:
+                    input_tokens = stream_chunk.usage.input_tokens
+                    output_tokens = stream_chunk.usage.output_tokens
+        except Exception as e:
+            logger.warning("chat_provider_failed session=%s category=%s", session.id, type(e).__name__)
+            yield RAGStreamEvent(type="error", error="The model is temporarily unavailable. Please retry.")
+            return
 
     full_text = "".join(full_text_parts)
     if not full_text.strip():
@@ -193,7 +222,7 @@ async def answer_question(
         session_id=session.id,
         role=DBMessageRole.ASSISTANT,
         content=full_text,
-        model_used=settings.LLM_CHAT_MODEL,
+        model_used=None if direct_answer is not None else settings.LLM_CHAT_MODEL,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         latency_ms=latency_ms,
@@ -212,7 +241,7 @@ async def answer_question(
             page_number=chunk.page_number,
             section=chunk.section,
             similarity_score=chunk.similarity,
-            excerpt=chunk.content[:500],
+            excerpt=chunk.content,
         )
         db.add(citation)
         citation_dicts.append(
@@ -223,11 +252,11 @@ async def answer_question(
                 "page_number": chunk.page_number,
                 "section": chunk.section,
                 "similarity_score": round(chunk.similarity, 4),
-                "excerpt": chunk.content[:500],
+                "excerpt": chunk.content,
             }
         )
     await db.flush()
-    db.add(ApiUsageLog(user_id=session.owner_id, endpoint="rag/completion", model=settings.LLM_CHAT_MODEL,
+    db.add(ApiUsageLog(user_id=session.owner_id, endpoint="rag/deterministic" if direct_answer is not None else "rag/completion", model=None if direct_answer is not None else settings.LLM_CHAT_MODEL,
                        input_tokens=input_tokens, output_tokens=output_tokens, latency_ms=latency_ms))
 
     yield RAGStreamEvent(

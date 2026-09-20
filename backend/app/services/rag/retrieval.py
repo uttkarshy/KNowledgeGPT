@@ -84,7 +84,7 @@ async def similarity_search(
     )
 
     if filters:
-        if filters.document_ids:
+        if filters.document_ids is not None:
             stmt = stmt.where(DocumentChunk.document_id.in_(filters.document_ids))
         if filters.language:
             stmt = stmt.where(Document.language == filters.language)
