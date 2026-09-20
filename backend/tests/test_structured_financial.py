@@ -341,3 +341,62 @@ def test_jsonb_key_order_does_not_change_mapping_or_hide_ocr_uncertainty():
     chunks[0].structure["confidence"] = [95, 95, 95, 95, 95, 0, 95]
     with pytest.raises(DateEvidenceLimit):
         transactions(chunks)
+
+
+def test_placeholder_row_after_header_is_skipped_but_transactions_are_kept():
+    chunks = table(
+        [
+            HEADER,
+            ["-", "-", "Opening placeholder", "-", "-", "-", "0.00"],
+            ["1", "20 Jul 2026", "Synthetic purchase", "TEST101", "820.00", "", "100.00"],
+            ["2", "21 Jul 2026", "Synthetic refund", "TEST102", "", "50.00", "150.00"],
+        ]
+    )
+    rows = transactions(chunks)
+    assert [(r[0], r[2], r[3]) for r in rows] == [
+        (date(2026, 7, 20), Decimal("820.00"), "debit"),
+        (date(2026, 7, 21), Decimal("50.00"), "credit"),
+    ]
+
+
+def test_dated_row_with_blank_debit_and_credit_still_fails_closed():
+    chunks = table(
+        [
+            HEADER,
+            ["1", "20 Jul 2026", "Synthetic ambiguous", "TEST103", "", "", "100.00"],
+        ]
+    )
+    with pytest.raises(DateEvidenceLimit):
+        transactions(chunks)
+
+
+def test_undated_row_with_directional_amount_still_fails_closed():
+    chunks = table(
+        [
+            HEADER,
+            ["1", "-", "Synthetic ambiguous", "TEST104", "25.00", "", "75.00"],
+        ]
+    )
+    with pytest.raises(DateEvidenceLimit):
+        transactions(chunks)
+
+
+def test_unrelated_later_page_with_reused_table_id_is_not_schema_propagated():
+    chunks = table()[:2]
+    legend = table(
+        [["Legend", "UPI - Synthetic payment code", "", "", "", "", ""]],
+        document_id=chunks[0].document_id,
+        page=6,
+    )[0]
+    assert len(transactions(chunks + [legend])) == 1
+
+
+def test_dated_later_page_without_local_header_still_fails_closed():
+    chunks = table()[:2]
+    orphan = table(
+        [["1", "22 Jul 2026", "Synthetic orphan", "TEST105", "30.00", "", "70.00"]],
+        document_id=chunks[0].document_id,
+        page=2,
+    )[0]
+    with pytest.raises(DateEvidenceLimit):
+        transactions(chunks + [orphan])
