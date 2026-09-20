@@ -18,6 +18,7 @@ def isolated_task_lock(monkeypatch):
         return await dp.process_document_async(task, document_id)
     monkeypatch.setattr(dp, "_process_locked", direct)
     monkeypatch.setattr(dp, "dispose_engine", AsyncMock())
+    monkeypatch.setattr(dp, "_record_failure", AsyncMock())
 
 
 def _fake_document(doc_id: str) -> Document:

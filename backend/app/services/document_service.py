@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import func, select, update
@@ -144,6 +145,7 @@ async def confirm_upload_and_enqueue(
         document.status_detail = "Uploaded size does not match the allowed file size"
         await db.commit()
         raise DocumentServiceError(document.status_detail)
+    document.confirmed_at = datetime.now(timezone.utc)
     document.status = DocumentStatus.VIRUS_SCANNING
     document.processing_progress_pct = 5
 
@@ -156,7 +158,9 @@ async def confirm_upload_and_enqueue(
         process_document.delay(str(document.id))
     except Exception as exc:
         document.status = DocumentStatus.FAILED
-        document.status_detail = "Processing queue is unavailable. Please retry."
+        document.status_detail = "Processing queue is unavailable. Retry Processing later."
+        document.error_code = "queue_unavailable"
+        document.retryable = True
         await db.commit()
         raise DocumentServiceError(document.status_detail) from exc
 
@@ -186,3 +190,37 @@ async def delete_document(db: AsyncSession, *, settings: Settings, document_id: 
     if document.temp_storage_key:
         delete_object(settings=settings, key=document.temp_storage_key)
     await db.delete(document)  # cascades to document_chunks via FK ondelete
+
+
+async def retry_processing(db: AsyncSession, *, settings: Settings, document_id: uuid.UUID, owner_id: uuid.UUID) -> Document:
+    doc = await db.scalar(select(Document).where(Document.id==document_id,Document.owner_id==owner_id).with_for_update())
+    if not doc:
+        raise DocumentNotFoundError('Document not found')
+    if doc.status not in (DocumentStatus.FAILED,DocumentStatus.PENDING):
+        return doc  # concurrent retry clicks do not enqueue duplicates
+    if not doc.retryable or not doc.confirmed_at or not doc.temp_storage_key:
+        raise DocumentServiceError('This document cannot be retried. Upload a different file.')
+    try:
+        size = head_object_size(settings=settings,key=doc.temp_storage_key)
+    except S3Error as exc:
+        raise DocumentServiceError('The original upload is unavailable. Upload the file again.') from exc
+    if size != doc.original_size_bytes:
+        raise DocumentServiceError('The original upload is incomplete. Upload the file again.')
+    doc.status = DocumentStatus.VIRUS_SCANNING
+    doc.status_detail = 'Retry queued; completed embedding batches will be reused.'
+    doc.error_code = None
+    doc.retryable = False
+    doc.next_retry_at = None
+    doc.automatic_retries = 0
+    await db.commit()
+    from app.workers.tasks.document_processing import process_document
+    try:
+        process_document.delay(str(doc.id))
+    except Exception as exc:
+        doc.status = DocumentStatus.FAILED
+        doc.error_code = 'queue_unavailable'
+        doc.retryable = True
+        doc.status_detail = 'Processing queue is unavailable. Try later.'
+        await db.commit()
+        raise DocumentServiceError(doc.status_detail) from exc
+    return doc

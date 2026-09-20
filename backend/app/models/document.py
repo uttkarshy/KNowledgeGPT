@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,6 +21,15 @@ class Document(Base, UUIDPKMixin, TimestampMixin):
     """
 
     __tablename__ = "documents"
+    error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    retryable: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_retry_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    automatic_retries: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    provider_rate_limit_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    last_error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    last_error_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
 
     knowledge_base_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

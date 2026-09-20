@@ -45,6 +45,7 @@ import os
 import tempfile
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from celery import Task
 from celery.exceptions import Retry
@@ -56,8 +57,10 @@ from app.db.session import AsyncSessionLocal, dispose_engine
 from app.models.document import Document
 from app.models.enums import DocumentStatus
 from app.services.embedding.pipeline import EmbeddingPipelineError, process_document_embeddings
+from app.services.llm.base import LLMProviderError
 from app.services.llm.factory import build_llm_provider
-from app.services.upload.validation import FileValidationError, validate_uploaded_file
+from app.services.processing_errors import ProcessingFailure, classify, retry_delay
+from app.services.upload.validation import validate_uploaded_file
 from app.services.upload.virus_scan import VirusFoundError, VirusScanUnavailableError, scan_file
 from app.workers.celery_app import celery_app
 
@@ -89,6 +92,26 @@ async def _fail(document_id: str, detail: str) -> None:
     await _update_status(document_id, status=DocumentStatus.FAILED, detail=detail, progress=0)
 
 
+async def _record_failure(document_id: str, failure: ProcessingFailure, delay: float | None = None) -> None:
+    async with AsyncSessionLocal() as db:
+        doc = await db.get(Document, uuid.UUID(document_id))
+        if not doc:
+            return
+        doc.error_code = failure.code
+        doc.last_error_code = failure.code
+        doc.last_error_at = datetime.now(timezone.utc)
+        doc.retryable = failure.retryable and bool(doc.temp_storage_key)
+        doc.next_retry_at = datetime.now(timezone.utc)+timedelta(seconds=delay) if delay is not None else None
+        if failure.code == 'provider_rate_limited':
+            doc.provider_rate_limit_count = (doc.provider_rate_limit_count or 0)+1
+        if delay is not None:
+            doc.automatic_retries = (doc.automatic_retries or 0)+1
+            doc.status = DocumentStatus.EMBEDDING
+            doc.status_detail = ('AI processing is temporarily rate-limited. KnowledgeGPT will retry automatically.'
+                if failure.code == 'provider_rate_limited' else 'AI processing is temporarily unavailable. KnowledgeGPT will retry automatically.')
+        await db.commit()
+
+
 async def process_document_async(self: Task, document_id: str) -> None:
     settings = get_settings()
     provider = None
@@ -98,10 +121,12 @@ async def process_document_async(self: Task, document_id: str) -> None:
         document = await _load_document(document_id)
         if document is None:
             raise DocumentProcessingError("Document was deleted or does not exist")
-        if document.status == DocumentStatus.COMPLETED:
+        if document.status in (DocumentStatus.COMPLETED, DocumentStatus.FAILED, DocumentStatus.PENDING):
+            return
+        if document.next_retry_at and document.next_retry_at > datetime.now(timezone.utc):
             return
         if not document.temp_storage_key:
-            raise DocumentProcessingError("Upload is unavailable. Upload the document again.")
+            raise ProcessingFailure("upload_unavailable", "The uploaded object is unavailable. Upload the file again.")
         with tempfile.TemporaryDirectory() as tmp_dir:
             # Never use a user-controlled path as a local destination.
             local_path = os.path.join(tmp_dir, "payload." + document.name.rsplit(".", 1)[-1].lower())
@@ -119,7 +144,7 @@ async def process_document_async(self: Task, document_id: str) -> None:
                 raise DocumentProcessingError(f"Could not complete {stage} after multiple attempts. Retry the upload.") from exc
             except VirusFoundError as exc:
                 delete_object(settings=settings, key=document.temp_storage_key)
-                raise DocumentProcessingError("File rejected: malware detected") from exc
+                raise ProcessingFailure("malware_detected", "File rejected: malware detected. Upload a different file.") from exc
 
             stage = "validation"
             await _update_status(document_id, status=DocumentStatus.EXTRACTING, detail=None, progress=20)
@@ -157,13 +182,22 @@ async def process_document_async(self: Task, document_id: str) -> None:
             # Vectors are already committed. Keep the key for lifecycle cleanup.
             logger.error("document=%s stage=cleanup category=%s", document_id, type(exc).__name__)
             return
-        if isinstance(exc, (DocumentProcessingError, FileValidationError, EmbeddingPipelineError)):
-            detail = str(exc)
-        else:
-            detail = f"Unexpected processing error during {stage}. Please retry or contact support."
+        failure = classify(exc, stage)
+        if isinstance(exc, EmbeddingPipelineError):
+            failure = ProcessingFailure('embedding_failure', 'Embedding generation failed. Retry Processing or contact support.', retryable=True)
+        if isinstance(exc, LLMProviderError) and failure.retryable:
+            current = await _load_document(document_id)
+            attempts = (current.automatic_retries or 0) if current else settings.CELERY_TASK_MAX_RETRIES
+            delay = retry_delay(attempts, settings.CELERY_TASK_RETRY_BACKOFF_SECONDS, getattr(exc,'retry_after',None))
+            if attempts < settings.CELERY_TASK_MAX_RETRIES and self.request.retries < settings.CELERY_TASK_MAX_RETRIES and delay <= 3600:
+                await _record_failure(document_id, failure, delay)
+                raise self.retry(exc=DocumentProcessingError(failure.code), countdown=delay,
+                                 max_retries=settings.CELERY_TASK_MAX_RETRIES) from None
+        detail = str(failure)
         logger.error("document=%s task=%s stage=%s category=%s duration=%.2f",
                      document_id, self.request.id, stage, type(exc).__name__, time.monotonic() - start)
         await _fail(document_id, detail)
+        await _record_failure(document_id, failure)
         raise DocumentProcessingError(detail) from None
     finally:
         if provider:
@@ -194,19 +228,34 @@ def process_document(self: Task, document_id: str) -> None:
 def reconcile_stalled_documents() -> None:
     """Recover abandoned uploads and jobs killed before Python cleanup ran."""
     async def reconcile():
-        from datetime import datetime, timedelta, timezone
-
-        from sqlalchemy import update
+        from sqlalchemy import select
         settings = get_settings()
-        cutoff = datetime.now(timezone.utc) - timedelta(seconds=settings.CELERY_TASK_TIME_LIMIT * 2)
+        now = datetime.now(timezone.utc)
+        cutoff = now-timedelta(seconds=settings.CELERY_TASK_TIME_LIMIT*2)
         try:
             async with AsyncSessionLocal() as db:
-                await db.execute(update(Document).where(
-                    Document.status.notin_([DocumentStatus.COMPLETED, DocumentStatus.FAILED]),
-                    Document.updated_at < cutoff,
-                ).values(status=DocumentStatus.FAILED, processing_progress_pct=0,
-                         status_detail="Upload or processing timed out. Delete this entry and upload the file again."))
-                await db.commit()
+                ids = list((await db.scalars(select(Document.id).where(
+                    Document.status.notin_([DocumentStatus.COMPLETED,DocumentStatus.FAILED]),
+                    Document.updated_at < cutoff).limit(100))).all())
+            for doc_id in ids:
+                key = int.from_bytes(hashlib.sha256(str(doc_id).encode()).digest()[:8], 'big', signed=True)
+                async with AsyncSessionLocal() as db:
+                    if not await db.scalar(text('SELECT pg_try_advisory_xact_lock(:key)'), {'key':key}):
+                        continue  # active worker owns this document, even if slow
+                    doc = await db.get(Document,doc_id,with_for_update=True)
+                    if not doc or doc.status in (DocumentStatus.COMPLETED,DocumentStatus.FAILED):
+                        continue
+                    if doc.next_retry_at and doc.next_retry_at > now:
+                        continue
+                    doc.status = DocumentStatus.FAILED
+                    doc.error_code = 'processing_timeout'
+                    doc.last_error_code = doc.error_code
+                    doc.last_error_at = now
+                    doc.next_retry_at = None
+                    doc.retryable = bool(doc.confirmed_at and doc.temp_storage_key)
+                    doc.status_detail = ('Processing stopped before completion. Retry Processing to resume saved batches.'
+                        if doc.retryable else 'Upload did not complete. Upload the file again.')
+                    await db.commit()
         finally:
             await dispose_engine()
     asyncio.run(reconcile())

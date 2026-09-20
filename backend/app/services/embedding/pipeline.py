@@ -18,7 +18,7 @@ import math
 import uuid
 from collections.abc import Awaitable, Callable
 
-from sqlalchemy import delete, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -29,8 +29,8 @@ from app.models.knowledge_base import KnowledgeBase
 from app.schemas.llm import EmbeddingRequest
 from app.services.chunking.semantic_chunker import Chunk, bound_chunk_bytes, chunk_document
 from app.services.extraction.registry import get_extractor
-from app.services.extraction.schemas import ExtractionError, UnsupportedFormatError
 from app.services.llm.base import LLMProvider
+from app.services.processing_errors import ProcessingFailure
 
 logger = logging.getLogger(__name__)
 
@@ -67,16 +67,11 @@ async def process_document_embeddings(
     if document is None:
         raise EmbeddingPipelineError(f"Document {document_id} not found")
 
-    # ---------------- Extraction ----------------
-    try:
-        extractor = get_extractor(document.file_type)
-    except UnsupportedFormatError as e:
-        raise EmbeddingPipelineError(str(e)) from e
-
-    try:
-        extracted = extractor.extract(local_file_path, settings=settings)
-    except ExtractionError as e:
-        raise EmbeddingPipelineError(f"Extraction failed: {e}") from e
+    if document.status == DocumentStatus.COMPLETED:
+        return document.chunk_count
+    await db.commit()  # no transaction held while extracting or updating progress
+    extractor = get_extractor(document.file_type)
+    extracted = extractor.extract(local_file_path, settings=settings)
 
     document.page_count = extracted.page_count
     document.language = extracted.detected_language
@@ -88,7 +83,7 @@ async def process_document_embeddings(
     # ---------------- Chunking ----------------
     chunks: list[Chunk] = bound_chunk_bytes(chunk_document(extracted), settings.EMBEDDING_MAX_INPUT_BYTES)
     if not chunks:
-        raise EmbeddingPipelineError("No extractable text content found in this document")
+        raise ProcessingFailure("no_extractable_content", "No extractable content was found. Upload a clearer or text-based file.")
     if len(chunks) > settings.MAX_CHUNKS_PER_DOCUMENT:
         raise EmbeddingPipelineError("Document exceeds the chunk limit. Upload a smaller document.")
 
@@ -96,19 +91,25 @@ async def process_document_embeddings(
     document.processing_progress_pct = 60
     if on_progress:
         await on_progress(str(document_id), status=DocumentStatus.EMBEDDING, detail=None, progress=60)
-    # Idempotent recovery; all old/new chunks remain in one transaction.
-    await db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document.id))
-
-    # ---------------- Embedding (batched) ----------------
+    # The worker's document advisory lock serializes duplicate deliveries.
+    # Only COMPLETED documents are visible to retrieval.
     embedding_model = settings.LLM_EMBEDDING_MODEL
-    stored_count = 0
-
-    for batch_start in range(0, len(chunks), settings.EMBEDDING_BATCH_SIZE):
-        batch = chunks[batch_start : batch_start + settings.EMBEDDING_BATCH_SIZE]
-        try:
-            result = await provider.embed(EmbeddingRequest(texts=[c.text for c in batch]))
-        except Exception as e:  # provider already normalizes its own exceptions
-            raise EmbeddingPipelineError("Embedding generation failed. Check provider health and retry.") from e
+    existing = list((await db.scalars(select(DocumentChunk).where(
+        DocumentChunk.document_id == document.id).order_by(DocumentChunk.chunk_index))).all())
+    valid = all(0 <= row.chunk_index < len(chunks)
+                and row.checksum == _chunk_checksum(chunks[row.chunk_index].text)
+                and row.embedding_model == embedding_model for row in existing)
+    if not valid:
+        await db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document.id))
+        existing = []
+    done = {row.chunk_index for row in existing}
+    await db.commit()
+    pending = [(i,chunk) for i,chunk in enumerate(chunks) if i not in done]
+    stored_count = len(done)
+    for offset in range(0,len(pending),settings.EMBEDDING_BATCH_SIZE):
+        indexed_batch = pending[offset:offset+settings.EMBEDDING_BATCH_SIZE]
+        batch = [chunk for _,chunk in indexed_batch]
+        result = await provider.embed(EmbeddingRequest(texts=[c.text for c in batch]))
 
         if len(result.embeddings) != len(batch):
             raise EmbeddingPipelineError(
@@ -125,7 +126,7 @@ async def process_document_embeddings(
                     document_id=document.id,
                     knowledge_base_id=document.knowledge_base_id,
                     owner_id=document.owner_id,
-                    chunk_index=batch_start + i,
+                    chunk_index=indexed_batch[i][0],
                     page_number=chunk.page_number,
                     section=chunk.section_title,
                     content=chunk.text,
@@ -137,15 +138,18 @@ async def process_document_embeddings(
             )
             stored_count += 1
 
-        progress = 60 + int(30 * (batch_start + len(batch)) / len(chunks))
+        progress = 60 + int(30 * stored_count / len(chunks))
         document.processing_progress_pct = min(progress, 90)
-        await db.flush()
+        await db.commit()  # save each completed batch before the next paid call
 
     # ---------------- Finalize ----------------
     document.chunk_count = stored_count
     document.embedding_model = embedding_model
     document.status = DocumentStatus.COMPLETED
     document.status_detail = None
+    document.error_code = None
+    document.retryable = False
+    document.next_retry_at = None
     document.processing_progress_pct = 100
 
     await db.execute(update(KnowledgeBase).where(KnowledgeBase.id == document.knowledge_base_id).values(

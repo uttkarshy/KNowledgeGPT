@@ -54,6 +54,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import AsyncIterator
 
 import httpx
@@ -145,6 +147,29 @@ def _extract_finish_reason(response: types.GenerateContentResponse) -> str:
     return getattr(finish_reason, "value", None) or str(finish_reason)
 
 
+def _retry_after(e: Exception) -> float | None:
+    delays = []
+    value = getattr(getattr(e, 'response', None), 'headers', {}).get('Retry-After')
+    if value:
+        try:
+            delays.append(float(value))
+        except (ValueError, TypeError):
+            try:
+                delays.append((parsedate_to_datetime(value)-datetime.now(timezone.utc)).total_seconds())
+            except (ValueError, TypeError, OverflowError):
+                pass
+    payload = getattr(e, 'details', {}) or {}
+    if isinstance(payload, dict):
+        error = payload.get('error',payload)
+        for detail in error.get('details', []) if isinstance(error, dict) else []:
+            if isinstance(detail, dict) and 'retryDelay' in detail:
+                try:
+                    delays.append(float(str(detail['retryDelay']).removesuffix('s')))
+                except (ValueError, TypeError):
+                    pass
+    return max((v for v in delays if math.isfinite(v) and v>=0), default=None)
+
+
 def _translate_error(e: Exception) -> LLMProviderError:
     """Maps google-genai SDK exceptions to our provider-agnostic exception
     types. The SDK's error taxonomy is coarser than OpenAI's (ClientError
@@ -155,8 +180,8 @@ def _translate_error(e: Exception) -> LLMProviderError:
     """
     if isinstance(e, ClientError):
         code = getattr(e, "code", None)
-        if code == 429:
-            return LLMRateLimitError("Gemini quota reached. Please try again later.")
+        if code == 429 or getattr(e,"status",None) == "RESOURCE_EXHAUSTED":
+            return LLMRateLimitError("Gemini quota reached. Please try again later.", retry_after=_retry_after(e))
         if code in (401, 403):
             return LLMProviderError("Gemini authentication failed. Contact support.")
         if code in (400, 404, 422):
@@ -287,6 +312,8 @@ class GeminiProvider(LLMProvider):
                 config=types.EmbedContentConfig(
                     output_dimensionality=self._settings.LLM_EMBEDDING_DIMENSIONS,
                     task_type=request.task_type,
+                    # Durable worker retries own the embedding budget.
+                    http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=1)),
                 ),
             )
         except Exception as e:
