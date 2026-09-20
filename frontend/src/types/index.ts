@@ -30,6 +30,9 @@ export interface DocumentSummary {
     | "completed"
     | "failed";
   status_detail: string | null;
+  error_code?: string | null;
+  retryable?: boolean;
+  next_retry_at?: string | null;
   processing_progress_pct: number;
   page_count: number | null;
   chunk_count: number;
@@ -101,6 +104,10 @@ export interface AnalyticsSummary {
   api_calls_last_24h: number;
   api_errors_last_24h: number;
   documents_by_status: Record<string, number>;
+  recent_signups_7d: number;
+  questions_7d: number;
+  embedding_429_count: number;
+  recent_processing_errors: Record<string, number>;
 }
 
 export interface ApiUsageLogEntry {

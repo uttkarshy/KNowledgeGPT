@@ -59,7 +59,9 @@ _EXTENSION_TO_FILE_TYPE: dict[str, FileType] = {
 
 
 class FileValidationError(Exception):
-    pass
+    def __init__(self, message: str, code: str = "invalid_file"):
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass
@@ -71,12 +73,12 @@ class ValidationResult:
 
 def validate_extension(filename: str, settings: Settings) -> str:
     if "." not in filename:
-        raise FileValidationError(f"File '{filename}' has no extension")
+        raise FileValidationError("File has no extension", "unsupported_format")
     ext = filename.rsplit(".", 1)[-1].lower()
     if ext not in settings.ALLOWED_FILE_EXTENSIONS:
         raise FileValidationError(
             f"File extension '.{ext}' is not allowed. "
-            f"Allowed: {', '.join(sorted(settings.ALLOWED_FILE_EXTENSIONS))}"
+            f"Allowed: {', '.join(sorted(settings.ALLOWED_FILE_EXTENSIONS))}", "unsupported_format"
         )
     return ext
 
@@ -86,7 +88,7 @@ def validate_size(size_bytes: int, settings: Settings) -> None:
         raise FileValidationError("File is empty")
     if size_bytes > settings.MAX_UPLOAD_SIZE_BYTES:
         raise FileValidationError(
-            f"File size {size_bytes} bytes exceeds the {settings.MAX_UPLOAD_SIZE_BYTES} byte limit"
+            f"File size {size_bytes} bytes exceeds the {settings.MAX_UPLOAD_SIZE_BYTES} byte limit", "file_too_large"
         )
 
 

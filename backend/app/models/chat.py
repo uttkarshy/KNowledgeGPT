@@ -59,7 +59,8 @@ class ChatMessage(Base, UUIDPKMixin, TimestampMixin):
 
     session: Mapped["ChatSession"] = relationship(back_populates="messages")
     citations: Mapped[list["ChatCitation"]] = relationship(
-        back_populates="message", cascade="all, delete-orphan"
+        back_populates="message", cascade="all, delete-orphan",
+        order_by="(ChatCitation.source_index.asc().nullslast(), ChatCitation.created_at, ChatCitation.id)"
     )
 
 
@@ -79,6 +80,8 @@ class ChatCitation(Base, UUIDPKMixin, TimestampMixin):
     chunk_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("document_chunks.id", ondelete="CASCADE"), nullable=False
     )
+
+    source_index: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     document_name: Mapped[str] = mapped_column(String(512), nullable=False)  # denormalized for display speed
     page_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

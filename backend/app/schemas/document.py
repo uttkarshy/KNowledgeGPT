@@ -35,6 +35,9 @@ class DocumentPublic(BaseModel):
     language: Optional[str] = None
     status: DocumentStatus
     status_detail: Optional[str] = None
+    error_code: Optional[str] = None
+    retryable: bool = False
+    next_retry_at: Optional[datetime] = None
     processing_progress_pct: int
     page_count: Optional[int] = None
     chunk_count: int
@@ -50,4 +53,7 @@ class DocumentStatusResponse(BaseModel):
     id: uuid.UUID
     status: DocumentStatus
     status_detail: Optional[str] = None
+    error_code: Optional[str] = None
+    retryable: bool = False
+    next_retry_at: Optional[datetime] = None
     processing_progress_pct: int

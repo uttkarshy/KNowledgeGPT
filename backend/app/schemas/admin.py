@@ -39,6 +39,10 @@ class AnalyticsSummary(BaseModel):
     api_calls_last_24h: int
     api_errors_last_24h: int
     documents_by_status: dict[str, int]
+    recent_signups_7d: int = 0
+    questions_7d: int = 0
+    embedding_429_count: int = 0
+    recent_processing_errors: dict[str, int] = {}
 
 
 class ApiUsageLogPublic(BaseModel):

@@ -36,8 +36,9 @@ logger = logging.getLogger(__name__)
 
 
 
-class EmbeddingPipelineError(Exception):
-    pass
+class EmbeddingPipelineError(ProcessingFailure):
+    def __init__(self, message: str):
+        super().__init__("embedding_failure", "Embedding processing failed. Retry Processing later or contact support.", retryable=True)
 
 
 def _chunk_checksum(text: str) -> str:
@@ -85,7 +86,7 @@ async def process_document_embeddings(
     if not chunks:
         raise ProcessingFailure("no_extractable_content", "No extractable content was found. Upload a clearer or text-based file.")
     if len(chunks) > settings.MAX_CHUNKS_PER_DOCUMENT:
-        raise EmbeddingPipelineError("Document exceeds the chunk limit. Upload a smaller document.")
+        raise ProcessingFailure("document_limit_exceeded", "Document exceeds the safe processing limit. Split it into smaller documents.")
 
     document.status = DocumentStatus.EMBEDDING
     document.processing_progress_pct = 60

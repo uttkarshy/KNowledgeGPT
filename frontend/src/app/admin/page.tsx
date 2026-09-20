@@ -99,7 +99,7 @@ function UserRow({ user }: { user: AdminUser }) {
 
 export default function AdminPage() {
   const [search, setSearch] = useState("");
-  const { data: analytics } = useAnalytics();
+  const { data: analytics, error: analyticsError, refetch: reloadAnalytics } = useAnalytics();
   const { data: users = [] } = useAdminUsers(search);
   const { data: errorLogs = [] } = useErrorLogs();
 
@@ -111,6 +111,7 @@ export default function AdminPage() {
           <p className="mt-1 text-sm text-ink-500">System-wide analytics, user management, and error monitoring.</p>
         </div>
 
+        {analyticsError && <p role="alert">Operations metrics unavailable. <button onClick={() => reloadAnalytics()}>Retry</button></p>}
         <section>
           <h2 className="font-mono text-xs uppercase tracking-wide text-ink-500">Overview</h2>
           <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -118,6 +119,15 @@ export default function AdminPage() {
             <StatCard label="Knowledge bases" value={analytics?.total_knowledge_bases ?? "—"} icon={Database} />
             <StatCard label="Documents" value={analytics?.total_documents ?? "—"} icon={FileStack} />
             <StatCard label="Chat sessions" value={analytics?.total_chat_sessions ?? "—"} icon={MessageSquare} />
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <StatCard label="Signups (7d)" value={analytics?.recent_signups_7d ?? "—"} icon={Users} />
+            <StatCard label="Questions (7d)" value={analytics?.questions_7d ?? "—"} icon={MessageSquare} />
+            <StatCard label="Embedding rate limits (retained docs)" value={analytics?.embedding_429_count ?? "—"} icon={AlertTriangle} />
+          </div>
+          <div className="mt-3 text-sm">
+            <p>Document states: {analytics ? Object.entries(analytics.documents_by_status).map(([state, count]) => `${state}: ${count}`).join(" · ") || "No documents" : "Loading…"}</p>
+            <p>Latest processing error per document (7d): {analytics ? Object.entries(analytics.recent_processing_errors).map(([code, count]) => `${code}: ${count}`).join(" · ") || "None" : "Loading…"}</p>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
             <StatCard label="Storage used" value={analytics ? formatBytes(analytics.total_storage_bytes) : "—"} icon={Database} />

@@ -3,7 +3,7 @@
 import { AlertCircle, CheckCircle2, FileText, Loader2, Trash2, Upload, X } from "lucide-react";
 import { useRef } from "react";
 import { formatBytes } from "@/lib/format";
-import { useDeleteDocument, useDocuments, useUploadDocument } from "@/hooks/use-documents";
+import { useDeleteDocument, useDocuments, useUploadDocument, useUploadLimits, useRetryProcessing } from "@/hooks/use-documents";
 import type { DocumentSummary } from "@/types";
 
 interface DocumentsPanelProps {
@@ -30,6 +30,8 @@ function StatusIcon({ status }: { status: DocumentSummary["status"] }) {
 
 export function DocumentsPanel({ knowledgeBaseId, onClose }: DocumentsPanelProps) {
   const { data: documents = [], isLoading, error: loadError, refetch } = useDocuments(knowledgeBaseId);
+  const limits = useUploadLimits();
+  const retryProcessing = useRetryProcessing(knowledgeBaseId);
   const deleteDocument = useDeleteDocument(knowledgeBaseId);
   const { upload, stage, progress, error } = useUploadDocument(knowledgeBaseId);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -53,23 +55,26 @@ export function DocumentsPanel({ knowledgeBaseId, onClose }: DocumentsPanelProps
         </div>
 
         <div className="border-b border-mist-200 p-4 dark:border-ink-700">
-          <input ref={fileInputRef} type="file" accept=".pdf,.docx,.txt,.csv,.xlsx,.pptx,.md,.html,.xml,.json,.rtf,.png,.jpg,.jpeg,.tiff,.bmp" className="hidden" onChange={handleFileChange} />
+          <input ref={fileInputRef} type="file" accept={limits.data?.allowed_extensions.map(ext => `.${ext}`).join(",")} className="hidden" onChange={handleFileChange} />
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading}
+            disabled={isUploading || !limits.data}
             className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-mist-200 py-3 text-sm text-ink-700 transition hover:border-stamp-teal hover:text-stamp-teal disabled:opacity-50 dark:border-ink-700 dark:text-mist-100"
           >
             <Upload size={15} />
             {isUploading ? `${stageLabel(stage)}${stage === "uploading" ? ` ${progress}%` : ""}` : "Upload a document"}
           </button>
-          <p className="mt-2 text-xs text-ink-500">Up to 25 MB per document.</p>
+          <p className="mt-2 text-xs text-ink-500">{limits.data
+            ? `Up to ${formatBytes(limits.data.max_size_bytes)} per document. PDFs: up to ${limits.data.max_pdf_pages} pages. Page count is checked before extraction; split larger PDFs.`
+            : "Loading upload limits…"}</p>
+          {limits.error && <p role="alert" className="text-xs text-danger">Upload limits unavailable. <button onClick={() => limits.refetch()}>Try again</button></p>}
           {stage === "done" && <p role="status" className="mt-2 text-xs">Upload received. Processing will continue below.</p>}
           {error && <p className="mt-2 text-xs text-danger">{error}</p>}
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 scrollbar-thin">
           {isLoading && <p>Loading documents…</p>}
-          {(loadError || deleteDocument.error) && <p role="alert" className="text-sm text-danger">{(loadError || deleteDocument.error)?.message} <button onClick={() => refetch()}>Retry</button></p>}
+          {(loadError || deleteDocument.error || retryProcessing.error) && <p role="alert" className="text-sm text-danger">{(loadError || deleteDocument.error || retryProcessing.error)?.message} <button onClick={() => refetch()}>Retry</button></p>}
           {!isLoading && !loadError && documents.length === 0 && (
             <p className="text-sm text-ink-500">No documents yet. Upload one to get started.</p>
           )}
@@ -92,8 +97,14 @@ export function DocumentsPanel({ knowledgeBaseId, onClose }: DocumentsPanelProps
                       {doc.status === "completed" && <span>· {doc.chunk_count} chunks</span>}
                     </div>
                     {doc.status_detail && (
-                      <p className="mt-1 text-[11px] text-danger">{doc.status_detail}</p>
+                      <p className={`mt-1 text-[11px] ${doc.status === "failed" ? "text-danger" : "text-ink-500"}`}>{doc.status_detail}</p>
                     )}
+                    {doc.next_retry_at && <p className="mt-1 text-xs">Automatic retry scheduled: {new Date(doc.next_retry_at).toLocaleTimeString()}</p>}
+                    {doc.status === "failed" && doc.retryable && <button
+                      disabled={retryProcessing.isPending}
+                      onClick={() => retryProcessing.mutate(doc.id)}
+                      className="mt-2 text-xs text-stamp-teal disabled:opacity-50"
+                    >{retryProcessing.isPending && retryProcessing.variables === doc.id ? "Queuing…" : "Retry Processing"}</button>}
                     <div className="mt-1 font-mono text-[10px] text-ink-500">
                       {formatBytes(doc.original_size_bytes)}
                     </div>

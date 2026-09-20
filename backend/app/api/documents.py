@@ -83,6 +83,9 @@ async def confirm_upload(
         status=document.status,
         status_detail=document.status_detail,
         processing_progress_pct=document.processing_progress_pct,
+        error_code=document.error_code,
+        retryable=document.retryable,
+        next_retry_at=document.next_retry_at,
     )
 
 
@@ -103,6 +106,9 @@ async def get_document_status(
         status=document.status,
         status_detail=document.status_detail,
         processing_progress_pct=document.processing_progress_pct,
+        error_code=document.error_code,
+        retryable=document.retryable,
+        next_retry_at=document.next_retry_at,
     )
 
 
@@ -130,3 +136,28 @@ async def delete_document(
         )
     except document_service.DocumentNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+
+
+@router.get("/limits")
+async def upload_limits(
+    _user: User = Depends(get_current_user), settings: Settings = Depends(get_settings),
+):
+    return {"max_size_bytes": settings.MAX_UPLOAD_SIZE_BYTES,
+            "max_pdf_pages": settings.MAX_PDF_PAGES,
+            "allowed_extensions": sorted(settings.ALLOWED_FILE_EXTENSIONS)}
+
+
+@router.post("/{document_id}/retry", response_model=DocumentPublic)
+async def retry_document(
+    document_id: uuid.UUID, current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db), settings: Settings = Depends(get_settings),
+):
+    await enforce_limit(settings, key=f"processing_retry:{current_user.id}", limit=10, seconds=3600)
+    await enforce_limit(settings, key="processing_retry_global", limit=200, seconds=3600)
+    try:
+        return await document_service.retry_processing(
+            db, settings=settings, document_id=document_id, owner_id=current_user.id)
+    except document_service.DocumentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except document_service.DocumentServiceError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

@@ -233,9 +233,10 @@ async def answer_question(
     await db.flush()
 
     citation_dicts: list[dict] = []
-    for chunk in context_chunks:
+    for source_index, chunk in enumerate(context_chunks, 1):
         citation = ChatCitation(
             message_id=assistant_message.id,
+            source_index=source_index,
             document_id=chunk.document_id,
             chunk_id=chunk.chunk_id,
             document_name=chunk.document_name,

@@ -61,3 +61,30 @@ Offline upgrade SQL from production revision 0003 through 0005 passed. Actual DB
 validation uses CI. Fixed the existing DB exact-date test's missing non-null test
 embedding, preserving its assertions. Stage B CI had passed Docker clean boot
 and migrations; frontend test runtime mismatch remains for final validation.
+
+## Stage D
+
+Upload controls fetch the authenticated server limits (including MAX_PDF_PAGES,
+currently 200 by default) instead of advertising a hard-coded size alone.
+Page count/encryption checks precede extraction/OCR. Retry Processing uses an
+owner-scoped, rate-limited endpoint; the UI shows recoverability and scheduled
+retry time and refreshes document state. Typed size/format/embedding errors no
+longer masquerade as extraction errors.
+
+Existing private admin analytics now include recent signup/question counts,
+retained-document quota occurrences, document states and latest processing error
+per document over seven days. These are aggregates, not an immutable event ledger;
+deleted documents disappear from these counts. No new public analytics or PII.
+
+Migration 0006 stores the source number for new citations and preserves their
+order after reload. Historical numbering cannot safely be reconstructed; old
+citations keep a stable fallback order. Rollback: preferably roll application
+code back while retaining additive columns. Downgrading 0006/0005 removes only
+new citation-order/row metadata; downgrading 0004 loses retry checkpoints metadata
+and uniqueness enforcement, so stop workers first and review before any downgrade.
+No applied migration is edited and no production data is reset.
+
+Validation: 97 backend tests passed, 4 local DB tests skipped; Ruff passed.
+Frontend: 5 tests passed, lint and typecheck passed, production build passed.
+Offline 0003-to-head migration SQL passed. Final actual DB/Docker checks follow
+in CI. P2 beta feedback is deferred while real scanned-row reliability is unresolved.

@@ -6,9 +6,9 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.chat import ChatSession
+from app.models.chat import ChatMessage, ChatSession
 from app.models.document import Document
-from app.models.enums import AuditAction
+from app.models.enums import AuditAction, MessageRole
 from app.models.knowledge_base import KnowledgeBase
 from app.models.usage import ApiUsageLog, AuditLog
 from app.models.user import User
@@ -118,7 +118,17 @@ async def get_analytics_summary(db: AsyncSession) -> AnalyticsSummary:
     status_rows = (await db.execute(select(Document.status, func.count(Document.id)).group_by(Document.status))).all()
     documents_by_status = {status.value: count for status, count in status_rows}
 
+    week = datetime.now(timezone.utc) - timedelta(days=7)
+    signups = await db.scalar(select(func.count(User.id)).where(User.created_at >= week)) or 0
+    questions = await db.scalar(select(func.count(ChatMessage.id)).where(
+        ChatMessage.role == MessageRole.USER, ChatMessage.created_at >= week)) or 0
+    quota = await db.scalar(select(func.coalesce(func.sum(Document.provider_rate_limit_count), 0))) or 0
+    errors = (await db.execute(select(Document.last_error_code, func.count(Document.id)).where(
+        Document.last_error_at >= week, Document.last_error_code.is_not(None)
+    ).group_by(Document.last_error_code))).all()
     return AnalyticsSummary(
+        recent_signups_7d=signups, questions_7d=questions, embedding_429_count=quota,
+        recent_processing_errors=dict(errors),
         total_users=total_users,
         total_knowledge_bases=total_kbs,
         total_documents=total_docs,

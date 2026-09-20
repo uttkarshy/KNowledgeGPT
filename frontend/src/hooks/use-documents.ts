@@ -29,6 +29,24 @@ export function useDeleteDocument(knowledgeBaseId: string | null) {
   });
 }
 
+export interface UploadLimits {
+  max_size_bytes: number;
+  max_pdf_pages: number;
+  allowed_extensions: string[];
+}
+
+export function useUploadLimits() {
+  return useQuery({ queryKey: ["upload-limits"], queryFn: () => apiJson<UploadLimits>("/api/documents/limits"), staleTime: 60000 });
+}
+
+export function useRetryProcessing(knowledgeBaseId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiJson<DocumentSummary>(`/api/documents/${id}/retry`, { method: "POST" }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["documents", knowledgeBaseId] }),
+  });
+}
+
 export type UploadStage = "idle" | "requesting-url" | "uploading" | "confirming" | "done" | "error";
 
 /**
@@ -46,13 +64,14 @@ export function useUploadDocument(knowledgeBaseId: string | null) {
   const upload = async (file: File) => {
     if (!knowledgeBaseId) return;
     setError(null);
-    if (file.size > 25 * 1024 * 1024 || file.size === 0) {
-      setError("Choose a non-empty file up to 25 MB."); setStage("error"); return;
-    }
     setProgress(0);
 
     try {
       setStage("requesting-url");
+      const limits = await apiJson<UploadLimits>("/api/documents/limits");
+      if (!file.size || file.size > limits.max_size_bytes) {
+        throw new Error(`Choose a non-empty file up to ${Math.floor(limits.max_size_bytes / 1024 / 1024)} MB.`);
+      }
       const { document_id, upload_url } = await apiJson<{ document_id: string; upload_url: string }>(
         "/api/documents/upload-url",
         {
