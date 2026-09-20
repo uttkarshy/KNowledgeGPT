@@ -35,6 +35,7 @@ class RetrievedChunk:
     page_number: int | None
     section: str | None
     similarity: float
+    structure: dict | None = None
 
 
 @dataclass
@@ -69,6 +70,7 @@ async def similarity_search(
             DocumentChunk.content,
             DocumentChunk.page_number,
             DocumentChunk.section,
+            DocumentChunk.structure,
             Document.name.label("document_name"),
             DocumentChunk.embedding.cosine_distance(query_embedding).label("distance"),
         )
@@ -113,6 +115,7 @@ async def similarity_search(
                 page_number=row.page_number,
                 section=row.section,
                 similarity=similarity,
+                structure=getattr(row, "structure", None),
             )
         )
         if len(results) >= top_k:

@@ -33,6 +33,7 @@ class Chunk:
     page_number: int | None
     section_title: str | None
     token_count: int
+    structure: dict | None = None
 
 
 def _split_long_paragraph(text: str, max_tokens: int) -> list[str]:
@@ -45,7 +46,7 @@ def _split_long_paragraph(text: str, max_tokens: int) -> list[str]:
             # An unbroken URL or cell may itself exceed the budget.
             fragments = [unit]
             if estimate_tokens(unit) > max_tokens:
-                fragments = [unit[i:i + max_tokens] for i in range(0, len(unit), max_tokens)]
+                fragments = [unit[i : i + max_tokens] for i in range(0, len(unit), max_tokens)]
             for fragment in fragments:
                 candidate = f"{current} {fragment}".strip()
                 if current and estimate_tokens(candidate) > max_tokens:
@@ -73,6 +74,15 @@ def bound_chunk_bytes(chunks: list[Chunk], max_bytes: int) -> list[Chunk]:
     """
     bounded = []
     for chunk in chunks:
+        if chunk.structure:
+            if len(chunk.text.encode("utf-8")) > max_bytes:
+                from app.services.processing_errors import ProcessingFailure
+
+                raise ProcessingFailure(
+                    "document_limit_exceeded", "A table row exceeds the safe processing limit. Upload a narrower table."
+                )
+            bounded.append(chunk)
+            continue
         remaining = chunk.text
         while remaining:
             raw = remaining.encode("utf-8")
@@ -81,7 +91,7 @@ def bound_chunk_bytes(chunks: list[Chunk], max_bytes: int) -> list[Chunk]:
                 boundary = max(part.rfind("\n"), part.rfind(" "))
                 if boundary > len(part) // 2:
                     part = part[:boundary]
-            remaining = remaining[len(part):].lstrip()
+            remaining = remaining[len(part) :].lstrip()
             bounded.append(Chunk(part, chunk.page_number, chunk.section_title, estimate_tokens(part)))
     return bounded
 
@@ -127,6 +137,13 @@ def chunk_document(
         current_page = block.page_number if block.page_number is not None else current_page
         current_section = block.section_title if block.section_title is not None else current_section
 
+        if block.structure:
+            if current_text_parts:
+                flush()
+            current_text_parts = []
+            current_tokens = 0
+            chunks.append(Chunk(block.text, current_page, current_section, block_tokens, structure=block.structure))
+            continue
         if block.kind == SectionKind.TABLE:
             if current_text_parts:
                 flush()
@@ -145,7 +162,9 @@ def chunk_document(
             for piece in _split_long_paragraph(block.text, chunk_size_tokens):
                 chunks.append(
                     Chunk(
-                        text=piece, page_number=current_page, section_title=current_section,
+                        text=piece,
+                        page_number=current_page,
+                        section_title=current_section,
                         token_count=estimate_tokens(piece),
                     )
                 )

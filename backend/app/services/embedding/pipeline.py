@@ -98,7 +98,8 @@ async def process_document_embeddings(
         DocumentChunk.document_id == document.id).order_by(DocumentChunk.chunk_index))).all())
     valid = all(0 <= row.chunk_index < len(chunks)
                 and row.checksum == _chunk_checksum(chunks[row.chunk_index].text)
-                and row.embedding_model == embedding_model for row in existing)
+                and row.embedding_model == embedding_model
+                and row.structure == chunks[row.chunk_index].structure for row in existing)
     if not valid:
         await db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document.id))
         existing = []
@@ -127,6 +128,7 @@ async def process_document_embeddings(
                     knowledge_base_id=document.knowledge_base_id,
                     owner_id=document.owner_id,
                     chunk_index=indexed_batch[i][0],
+                    structure=chunk.structure,
                     page_number=chunk.page_number,
                     section=chunk.section_title,
                     content=chunk.text,

@@ -40,3 +40,6 @@ pandas>=2.2
 # air-gapped/restricted production deployment too. See
 # app/services/chunking/token_estimate.py for the character-based
 # approximation used instead for chunk-sizing purposes.
+
+# CPU-only geometry for ruled scan tables.
+opencv-python-headless>=4.10,<5

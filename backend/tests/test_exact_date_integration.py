@@ -42,7 +42,7 @@ async def test_date_scan_real_postgres_all_pages_and_tenant_isolation():
                 for row in statement():
                     db.add(DocumentChunk(id=uuid.uuid4(), document_id=doc_id, owner_id=user_id,
                             knowledge_base_id=knowledge_base_id, chunk_index=row.chunk_index, content=row.content,
-                            page_number=row.page_number, checksum='b' * 64, embedding_model='gemini-embedding-001'))
+                            page_number=row.page_number, embedding=[1.0] + [0.0] * 1535, checksum='b' * 64, embedding_model='gemini-embedding-001'))
             await db.commit()
             evidence = await exact_date_evidence(db, target=date(2026, 7, 31), owner_id=owner, knowledge_base_id=kb,
                                                  filters=RetrievalFilters(document_ids=[target_doc]))

@@ -5,7 +5,7 @@ from typing import Optional
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base_class import Base, TimestampMixin, UUIDPKMixin
@@ -26,6 +26,7 @@ class DocumentChunk(Base, UUIDPKMixin, TimestampMixin):
     """
 
     __tablename__ = "document_chunks"
+    structure: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     __table_args__ = (UniqueConstraint("document_id", "chunk_index", name="uq_document_chunk_index"),)
 
     document_id: Mapped[uuid.UUID] = mapped_column(

@@ -35,7 +35,7 @@ from app.services.rag.exact_date import (
     context_cost,
     exact_date_evidence,
 )
-from app.services.rag.exhaustive import calculate, evidence, narrow
+from app.services.rag.exhaustive import calculate, evidence, named_rows, narrow
 from app.services.rag.prompt_assembly import assemble_messages
 from app.services.rag.query_router import route
 from app.services.rag.retrieval import RetrievalFilters, RetrievedChunk, similarity_search
@@ -123,7 +123,8 @@ async def answer_question(
             elif context_cost(special_context) > MAX_CONTEXT_TOKENS:
                 raise DateEvidenceLimit('Complete evidence exceeds the safe context limit. Select fewer documents.')
         elif plan.strategy == 'row':
-            raise DateEvidenceLimit('Reliable structured rows are required for this lookup. Use a clear table or structured export; missing cells will not be guessed.')
+            rows = await evidence(db, owner_id=session.owner_id, kb_id=session.knowledge_base_id, filters=filters)
+            direct_answer, special_context = named_rows(rows, plan.names)
         logger.info('retrieval_strategy=%s', plan.strategy)
         if target:
             date_context = await exact_date_evidence(db, target=target, owner_id=session.owner_id,

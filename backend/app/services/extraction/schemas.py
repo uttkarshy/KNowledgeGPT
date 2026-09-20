@@ -28,6 +28,7 @@ class ExtractedBlock:
     heading_level: int | None = None   # 1 = H1/Title, 2 = H2, etc. Only set for HEADING blocks.
     page_number: int | None = None
     section_title: str | None = None   # nearest enclosing heading, for citation display
+    structure: dict | None = None
 
 
 @dataclass

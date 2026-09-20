@@ -10,6 +10,8 @@ page is handled correctly.
 
 from __future__ import annotations
 
+import re
+
 import fitz  # PyMuPDF
 from PIL import Image
 
@@ -22,10 +24,12 @@ from app.services.extraction.schemas import (
     ExtractionError,
     SectionKind,
 )
-from app.services.ocr.tesseract_engine import detect_script_language, ocr_image
+from app.services.extraction.table_rows import row_block
+from app.services.ocr.structured import scanned_page
+from app.services.processing_errors import ProcessingFailure
 
 _MIN_CHARS_PER_PAGE_TO_SKIP_OCR = 20  # below this, treat the page as scanned
-_OCR_RENDER_DPI_ZOOM = 2.0  # ~144 DPI, good balance of OCR accuracy vs. speed
+_OCR_RENDER_DPI_ZOOM = 3.0  # ~216 DPI, good balance of OCR accuracy vs. speed
 
 
 def _heading_level_for_span(span_size: float, body_size: float) -> int | None:
@@ -47,66 +51,68 @@ class PDFExtractor(TextExtractor):
             raise ExtractionError(f"Could not open PDF: {e}") from e
 
         pages: list[ExtractedPage] = []
-        if doc.is_encrypted or len(doc) > settings.MAX_PDF_PAGES:
+        if doc.is_encrypted:
             doc.close()
-            raise ExtractionError("PDF is encrypted or exceeds the page limit")
+            raise ProcessingFailure("encrypted_pdf", "This PDF is encrypted. Upload an unlocked copy.")
+        if len(doc) > settings.MAX_PDF_PAGES:
+            count = len(doc)
+            doc.close()
+            raise ProcessingFailure(
+                "page_limit_exceeded",
+                f"This PDF contains {count} pages. KnowledgeGPT Beta currently supports up to {settings.MAX_PDF_PAGES} pages per document. Split it into smaller files.",
+            )
         current_section_title: str | None = None
-        lang_votes: dict[str, int] = {}
 
-        for page_index in range(len(doc)):
-            page = doc[page_index]
-            page_number = page_index + 1
-            native_text = page.get_text("text").strip()
+        try:
+            for page_index in range(len(doc)):
+                page = doc[page_index]
+                page_number = page_index + 1
+                native_text = page.get_text("text").strip()
 
-            if len(native_text) >= _MIN_CHARS_PER_PAGE_TO_SKIP_OCR:
-                blocks, current_section_title = self._extract_native_blocks(
-                    page, page_number, current_section_title
+                image_area = max((fitz.Rect(info["bbox"]).get_area() for info in page.get_image_info()), default=0)
+                scanned = len(native_text) < _MIN_CHARS_PER_PAGE_TO_SKIP_OCR or (
+                    len(native_text) < 100 and image_area > page.rect.get_area() * 0.5
                 )
-                pages.append(ExtractedPage(page_number=page_number, blocks=blocks, was_ocr=False))
-                lang_votes["native"] = lang_votes.get("native", 0) + 1
-            else:
-                if page.rect.width * page.rect.height * _OCR_RENDER_DPI_ZOOM**2 > 30_000_000:
-                    raise ExtractionError("PDF page exceeds the safe OCR pixel limit")
-                pix = page.get_pixmap(matrix=fitz.Matrix(_OCR_RENDER_DPI_ZOOM, _OCR_RENDER_DPI_ZOOM))
-                image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-
-                eng_result = ocr_image(image, languages=["eng"])
-                hin_result = ocr_image(image, languages=["hin"])
-                page_lang = detect_script_language(eng_result, hin_result)
-                best = eng_result if page_lang != "hi" else hin_result
-                if page_lang == "en+hi":
-                    combined = ocr_image(image, languages=["eng", "hin"])
-                    best = combined
-
-                block = ExtractedBlock(
-                    kind=SectionKind.PARAGRAPH,
-                    text=best.text,
-                    page_number=page_number,
-                    section_title=current_section_title,
-                )
-                pages.append(
-                    ExtractedPage(
-                        page_number=page_number,
-                        blocks=[block] if best.text else [],
-                        was_ocr=True,
-                        ocr_confidence=best.mean_confidence,
+                if not scanned:
+                    blocks, current_section_title = self._extract_native_blocks(
+                        page, page_number, current_section_title
                     )
-                )
-                lang_votes[page_lang] = lang_votes.get(page_lang, 0) + 1
+                    pages.append(ExtractedPage(page_number=page_number, blocks=blocks, was_ocr=False))
+                else:
+                    if page.rect.width * page.rect.height * _OCR_RENDER_DPI_ZOOM**2 > 12_000_000:
+                        raise ProcessingFailure(
+                            "ocr_failure", "PDF page exceeds the safe OCR resolution. Upload a smaller scan."
+                        )
+                    pix = page.get_pixmap(matrix=fitz.Matrix(_OCR_RENDER_DPI_ZOOM, _OCR_RENDER_DPI_ZOOM))
+                    image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
 
-        doc.close()
+                    try:
+                        pages.append(scanned_page(image, page_number))
+                    finally:
+                        image.close()
 
-        detected_language = None
-        non_native_votes = {k: v for k, v in lang_votes.items() if k != "native"}
-        if non_native_votes:
-            detected_language = max(non_native_votes, key=non_native_votes.get)
+        finally:
+            doc.close()
 
-        return ExtractedDocument(pages=pages, detected_language=detected_language, page_count=len(pages))
+        return ExtractedDocument(pages=pages, detected_language=None, page_count=len(pages))
 
     def _extract_native_blocks(
         self, page: "fitz.Page", page_number: int, current_section_title: str | None
     ) -> tuple[list[ExtractedBlock], str | None]:
         blocks: list[ExtractedBlock] = []
+        bounds = []
+        for table_id, table in enumerate(page.find_tables().tables):
+            rows = table.extract()
+            if len(rows) < 2:
+                continue
+            # Reject missing headers instead of assigning invented column names.
+            if not any(re.search(r"[A-Za-z]", str(v or "")) for v in rows[0]):
+                continue
+            bounds.append(fitz.Rect(table.bbox))
+            for row_index, values in enumerate(rows[1:], 1):
+                blocks.append(
+                    row_block(rows[0], values, page_number=page_number, table_id=table_id, row_index=row_index)
+                )
         page_dict = page.get_text("dict")
 
         # Determine the modal (most common) font size on the page as the
@@ -120,6 +126,8 @@ class PDFExtractor(TextExtractor):
 
         for block in page_dict.get("blocks", []):
             for line in block.get("lines", []):
+                if any(bound.contains(fitz.Rect(line["bbox"])) for bound in bounds):
+                    continue
                 line_text = "".join(span["text"] for span in line.get("spans", [])).strip()
                 if not line_text:
                     continue

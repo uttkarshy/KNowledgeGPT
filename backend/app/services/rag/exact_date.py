@@ -106,14 +106,14 @@ async def exact_date_evidence(
     rows = (await db.execute(scope.with_only_columns(
         DocumentChunk.id, DocumentChunk.document_id, DocumentChunk.chunk_index,
         func.substr(DocumentChunk.content, 1, MAX_SCAN_CHARS + 1).label("content"),
-        DocumentChunk.page_number, DocumentChunk.section, Document.name.label("document_name")
+        DocumentChunk.page_number, DocumentChunk.section, DocumentChunk.structure, Document.name.label("document_name")
     ).order_by(DocumentChunk.document_id, DocumentChunk.chunk_index).limit(MAX_SCAN_CHUNKS + 1))).all()
     if len(rows) > MAX_SCAN_CHUNKS or sum(len(r.content) for r in rows) > MAX_SCAN_CHARS:
         raise DateEvidenceLimit(LIMIT_MESSAGE)
     pattern = date_pattern(target)
     matched = {(r.document_id, r.chunk_index) for r in rows if pattern.search(r.content)}
     selected = [r for r in rows if any((r.document_id, r.chunk_index + offset) in matched for offset in (-1, 0, 1))]
-    evidence = [RetrievedChunk(r.id, r.document_id, r.document_name, r.content, r.page_number, r.section, 1.0) for r in selected]
+    evidence = [RetrievedChunk(r.id, r.document_id, r.document_name, r.content, r.page_number, r.section, 1.0, structure=getattr(r, "structure", None)) for r in selected]
     if context_cost(evidence) > MAX_CONTEXT_TOKENS:
         raise DateEvidenceLimit(LIMIT_MESSAGE)
     return evidence

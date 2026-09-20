@@ -83,7 +83,10 @@ async def evidence(db, *, owner_id, kb_id, filters=None, lexical=None):
     ).all()
     if len(rows) > MAX_SCAN_CHUNKS or sum(len(c.content) for c, _ in rows) > MAX_SCAN_CHARS:
         raise DateEvidenceLimit("The evidence changed or exceeds the safe limit. Narrow the selection.")
-    return [RetrievedChunk(c.id, c.document_id, name, c.content, c.page_number, c.section, 1.0) for c, name in rows]
+    return [
+        RetrievedChunk(c.id, c.document_id, name, c.content, c.page_number, c.section, 1.0, structure=c.structure)
+        for c, name in rows
+    ]
 
 
 def _date(value):
@@ -138,6 +141,28 @@ DATE_LINE = re.compile(r"^\s*(\d{1,2}[ /.-]+(?:[A-Za-z]{3,9}|\d{1,2})[ /.,-]+\d{
 def transactions(chunks):
     result, seen, headers = [], set(), {}
     for chunk in chunks:
+        structure = chunk.structure or {}
+        if structure.get("kind") == "table_row":
+            cells = structure["cells"]
+            if not any(
+                re.sub("[^a-z]", "", k.lower()) in ("date", "transactiondate", "txndate", "valuedate") for k in cells
+            ):
+                continue
+            identity = (chunk.document_id, chunk.page_number, structure.get("table_id"), structure.get("row_index"))
+            if identity in seen:
+                raise DateEvidenceLimit("Duplicate row provenance prevents a reliable calculation.")
+            seen.add(identity)
+            try:
+                result.append((*_transaction(cells), chunk))
+            except ValueError as exc:
+                raise DateEvidenceLimit(
+                    "A table transaction contains missing or uncertain cells. No partial calculation was made."
+                ) from exc
+            continue
+        if structure.get("kind") == "ocr_line":
+            raise DateEvidenceLimit(
+                "Scanned transaction columns could not be reconstructed reliably. Upload a structured export for financial calculations."
+            )
         for line in chunk.content.splitlines():
             parts = [p.strip() for p in line.split("|")]
             if len(parts) >= 3 and any(re.fullmatch(r"(date|transaction date|txn date)", p, re.I) for p in parts):
@@ -216,3 +241,32 @@ def calculate(chunks, plan, question):
         value = total / len(rows) if plan.operation == "average" else total
         text = f"{'Average' if plan.operation == 'average' else 'Total'}: **₹{value:,.2f}** across {len(rows)} {direction} transactions. {refs}"
     return text, sources
+
+
+def named_rows(chunks, names):
+    selected = []
+    for name in names:
+        pattern = re.compile(r"\b" + r"\s+".join(re.escape(t) for t in name.split()) + r"\b", re.I)
+        matches = [
+            c
+            for c in chunks
+            if c.structure
+            and c.structure.get("kind") == "table_row"
+            and any(pattern.search(str(v)) for v in c.structure["cells"].values())
+        ]
+        if not matches:
+            raise DateEvidenceLimit(
+                "A reliably extracted row for a requested name was not found. Upload a clearer scan or structured export; missing cells will not be guessed."
+            )
+        selected.extend(c for c in matches if c.chunk_id not in {r.chunk_id for r in selected})
+    if len(selected) > 20:
+        raise DateEvidenceLimit("Too many rows match. Select one document or give more specific names.")
+    parts = []
+    for index, chunk in enumerate(selected, 1):
+        fields = []
+        for key, value in chunk.structure["cells"].items():
+            key = re.sub(r"[\n\r|`<>\[\]*]", " ", key)
+            value = re.sub(r"[\n\r|`<>\[\]*]", " ", str(value))
+            fields.append(f"- **{key}:** {value or 'Could not be reliably extracted'}")
+        parts.append(f"Page {chunk.page_number}, row {chunk.structure['row_index']} [{index}]\n\n" + "\n".join(fields))
+    return "\n\n".join(parts), selected
