@@ -102,14 +102,37 @@ class FinancialTableHeaders:
             self.schemas[table] = old = direct
             self.pages.add(page)
         if old is not None:
-            if page not in self.pages or set(cells) != set(old):
+            # PDF table IDs can be reused by unrelated tables on later pages.
+            # Never propagate a schema to a page that did not confirm it.
+            if page not in self.pages:
+                if not dated:
+                    return None
+                _fail()
+            if set(cells) != set(old):
                 _fail()
             mapping = old
         else:
             _fail()  # A dated generic row cannot be silently dropped.
         self._confidence(structure, mapping)
+        normalized = {field: cells[physical] for physical, field in mapping.items() if field}
+        # Extractors can emit separator/opening placeholders inside a valid
+        # transaction table. Skip only an undated row with no directional
+        # amount; dated rows and undated rows carrying money still fail closed.
+        if not dated and self._blank_directions(normalized):
+            return None
         # Keep empty strings exactly: blank debit and populated credit is credit.
-        return {field: cells[physical] for physical, field in mapping.items() if field}
+        return normalized
+
+    @staticmethod
+    def _blank_directions(cells):
+        blank = {"", "-", "—", "none", "null"}
+        if "debit" in cells or "credit" in cells:
+            values = (cells.get("debit"), cells.get("credit"))
+            return all(str(value).strip().lower() in blank for value in values)
+        if "amount" in cells or "direction" in cells:
+            values = (cells.get("amount"), cells.get("direction"))
+            return all(str(value).strip().lower() in blank for value in values)
+        return False
 
     @staticmethod
     def _confidence(structure, mapping):
