@@ -13,6 +13,7 @@ from app.models.chunk import DocumentChunk
 from app.models.document import Document
 from app.models.enums import DocumentStatus
 from app.services.rag.exact_date import MAX_SCAN_CHARS, MAX_SCAN_CHUNKS, DateEvidenceLimit, explicit_date
+from app.services.rag.legacy_financial import vertical_transactions
 from app.services.rag.retrieval import RetrievalFilters, RetrievedChunk
 
 
@@ -84,7 +85,10 @@ async def evidence(db, *, owner_id, kb_id, filters=None, lexical=None):
     if len(rows) > MAX_SCAN_CHUNKS or sum(len(c.content) for c, _ in rows) > MAX_SCAN_CHARS:
         raise DateEvidenceLimit("The evidence changed or exceeds the safe limit. Narrow the selection.")
     return [
-        RetrievedChunk(c.id, c.document_id, name, c.content, c.page_number, c.section, 1.0, structure=c.structure)
+        RetrievedChunk(
+            c.id, c.document_id, name, c.content, c.page_number, c.section, 1.0,
+            structure=c.structure, chunk_index=c.chunk_index,
+        )
         for c, name in rows
     ]
 
@@ -139,8 +143,11 @@ DATE_LINE = re.compile(r"^\s*(\d{1,2}[ /.-]+(?:[A-Za-z]{3,9}|\d{1,2})[ /.,-]+\d{
 
 
 def transactions(chunks):
-    result, seen, headers = [], set(), {}
+    result, consumed = vertical_transactions(chunks)
+    seen, headers = set(), {}
     for chunk in chunks:
+        if chunk.chunk_id in consumed:
+            continue
         structure = chunk.structure or {}
         if structure.get("kind") == "table_row":
             cells = structure["cells"]
@@ -216,7 +223,7 @@ def calculate(chunks, plan, question):
         if plan.operation in ("top", "bottom")
         else rows
     )
-    sources = list({r[4].chunk_id: r[4] for r in output}.values())
+    sources = list({c.chunk_id: c for r in output for c in r[4:]}.values())
     if len(sources) > 32 or (plan.operation == "all" and len(output) > 50):
         raise DateEvidenceLimit(
             "The complete answer exceeds the citation/output limit. Narrow the period or document selection."
@@ -225,14 +232,15 @@ def calculate(chunks, plan, question):
     refs = " ".join(f"[{i + 1}]" for i in range(len(sources)))
     if plan.operation in ("top", "bottom", "all"):
         text = f"Analyzed {len(rows)} complete {direction} rows.\n\n| Date | Description | Amount | Source |\n|---|---|---:|---|\n"
-        for day, description, amount, _, source in output:
+        for day, description, amount, _, *row_sources in output:
             description = re.sub(r"[\n\r|`<>\[\]]", " ", description)
-            text += f"| {day.isoformat()} | {description} | ₹{amount:,.2f} | [{indices[source.chunk_id]}] |\n"
+            row_refs = " ".join(f"[{indices[c.chunk_id]}]" for c in row_sources)
+            text += f"| {day.isoformat()} | {description} | ₹{amount:,.2f} | {row_refs} |\n"
     elif plan.operation == "count":
         text = f"Count: **{len(rows)} {direction} transactions**. {refs}"
     elif plan.operation == "compare":
         groups = {}
-        for day, _, amount, _, _ in rows:
+        for day, _, amount, *_ in rows:
             key = day.strftime("%Y-%m")
             groups[key] = groups.get(key, Decimal(0)) + amount
         text = "Monthly totals:\n" + "\n".join(f"- {k}: ₹{v:,.2f}" for k, v in sorted(groups.items())) + "\n" + refs

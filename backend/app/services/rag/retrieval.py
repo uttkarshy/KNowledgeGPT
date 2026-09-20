@@ -36,6 +36,7 @@ class RetrievedChunk:
     section: str | None
     similarity: float
     structure: dict | None = None
+    chunk_index: int | None = None
 
 
 @dataclass
