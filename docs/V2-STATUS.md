@@ -88,3 +88,24 @@ Validation: 97 backend tests passed, 4 local DB tests skipped; Ruff passed.
 Frontend: 5 tests passed, lint and typecheck passed, production build passed.
 Offline 0003-to-head migration SQL passed. Final actual DB/Docker checks follow
 in CI. P2 beta feedback is deferred while real scanned-row reliability is unresolved.
+
+## Stage E validation checkpoint
+
+Adds a real PostgreSQL test for committed embedding batches surviving a provider
+429 and a new DB session, single final counters, unique chunk indices, exclusion
+of incomplete/foreign evidence, monthly ranking and citation order after reload.
+The provider is deliberately mocked for deterministic 429 injection; PostgreSQL
+and pgvector are real in CI. This does not claim a live Gemini acceptance test.
+
+CI seeds synthetic users/documents/vectors at production-compatible revision
+0003, upgrades to head, verifies original data and new defaults, and removes its
+synthetic fixture. The smoke script refuses non-local/non-test databases.
+The frontend CI runtime now uses Node 24 because the existing locked jsdom test
+dependency does not support Node 20. Pure-ASGI usage logging is unchanged except
+for CRLF normalization (whitespace-insensitive diff verified empty).
+
+Local final checks: 97 backend tests passed, 5 PostgreSQL tests skipped; Ruff
+passed. Frontend 5 tests, lint, typecheck and production build passed. Offline
+0003-to-0006 SQL generation passed. Local Docker/PostgreSQL executables are not
+available; actual DB/migration/Docker validation runs in GitHub CI on this branch.
+Final CI results are reported separately after the checkpoint is pushed.

@@ -34,7 +34,7 @@ jobs:
           cache-dependency-path: backend/requirements-dev.txt
 
       - name: Install system dependencies (Tesseract OCR)
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq tesseract-ocr tesseract-ocr-hin
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq tesseract-ocr tesseract-ocr-hin fonts-dejavu-core
 
       - name: Install Python dependencies
         working-directory: backend
@@ -47,8 +47,10 @@ jobs:
       - name: Initialize and upgrade a clean PostgreSQL database
         working-directory: backend
         run: |
-          alembic upgrade 0001_initial_schema
+          alembic upgrade 0003_token_version
+          python -m tests.migration_smoke seed
           alembic upgrade head
+          python -m tests.migration_smoke verify
           alembic current
 
       - name: Run tests
@@ -62,7 +64,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
