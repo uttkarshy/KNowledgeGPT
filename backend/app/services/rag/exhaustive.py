@@ -15,6 +15,7 @@ from app.models.enums import DocumentStatus
 from app.services.rag.exact_date import MAX_SCAN_CHARS, MAX_SCAN_CHUNKS, DateEvidenceLimit, explicit_date
 from app.services.rag.legacy_financial import vertical_transactions
 from app.services.rag.retrieval import RetrievalFilters, RetrievedChunk
+from app.services.rag.structured_financial import FinancialTableHeaders
 
 
 def scope(owner_id, kb_id, filters):
@@ -143,28 +144,30 @@ DATE_LINE = re.compile(r"^\s*(\d{1,2}[ /.-]+(?:[A-Za-z]{3,9}|\d{1,2})[ /.,-]+\d{
 
 
 def transactions(chunks):
-    result, consumed = vertical_transactions(chunks)
+    # Validate structured evidence first. Legacy reconstruction excludes it and
+    # retains its existing refusal of unreconcilable mixed representations.
+    table_headers = FinancialTableHeaders()
+    result = []
+    for chunk in chunks:
+        if (chunk.structure or {}).get("kind") != "table_row":
+            continue
+        cells = table_headers.cells(chunk)
+        if cells is None:
+            continue
+        try:
+            result.append((*_transaction(cells), chunk))
+        except ValueError as exc:
+            raise DateEvidenceLimit(
+                "A table transaction contains missing or uncertain cells. No partial calculation was made."
+            ) from exc
+    legacy, consumed = vertical_transactions(chunks)
+    result.extend(legacy)
     seen, headers = set(), {}
     for chunk in chunks:
         if chunk.chunk_id in consumed:
             continue
         structure = chunk.structure or {}
         if structure.get("kind") == "table_row":
-            cells = structure["cells"]
-            if not any(
-                re.sub("[^a-z]", "", k.lower()) in ("date", "transactiondate", "txndate", "valuedate") for k in cells
-            ):
-                continue
-            identity = (chunk.document_id, chunk.page_number, structure.get("table_id"), structure.get("row_index"))
-            if identity in seen:
-                raise DateEvidenceLimit("Duplicate row provenance prevents a reliable calculation.")
-            seen.add(identity)
-            try:
-                result.append((*_transaction(cells), chunk))
-            except ValueError as exc:
-                raise DateEvidenceLimit(
-                    "A table transaction contains missing or uncertain cells. No partial calculation was made."
-                ) from exc
             continue
         if structure.get("kind") == "ocr_line":
             raise DateEvidenceLimit(
