@@ -381,6 +381,40 @@ def test_undated_row_with_directional_amount_still_fails_closed():
         transactions(chunks)
 
 
+
+def test_unstructured_companion_text_on_structured_page_is_not_reparsed_as_legacy():
+    chunks = table(
+        [
+            HEADER,
+            ["1", "20 Jul 2026", "Synthetic purchase", "TEST201", "820.00", "", "100.00"],
+        ]
+    )
+    companion = RetrievedChunk(
+        uuid.uuid4(),
+        chunks[0].document_id,
+        "synthetic.pdf",
+        "Account Statement 01 Jul 2026 - 31 Jul 2026\n\n"
+        "1\n\n"
+        "20 Jul 2026\n\n"
+        "Synthetic purchase\n\n"
+        "TEST201\n\n"
+        "820.00\n\n"
+        "100.00\n\n"
+        "Page 1 of 1",
+        1,
+        None,
+        1.0,
+        structure=None,
+        chunk_index=2,
+    )
+
+    rows = transactions(chunks + [companion])
+
+    assert [(r[0], r[1], r[2], r[3]) for r in rows] == [
+        (date(2026, 7, 20), "Synthetic purchase", Decimal("820.00"), "debit")
+    ]
+
+
 def test_unrelated_later_page_with_reused_table_id_is_not_schema_propagated():
     chunks = table()[:2]
     legend = table(
