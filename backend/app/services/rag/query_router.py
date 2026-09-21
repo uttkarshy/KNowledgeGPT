@@ -47,7 +47,7 @@ def route(question: str) -> QueryPlan:
             re.I,
         )
     )
-    if re.search(r"\b(highest|top)\s+(qualification|degree|education)\b", question, re.I):
+    if re.search(r"\b(highest|top)\s+(?:educational\s+)?(qualification|degree|education)\b", question, re.I):
         analytical = False
     periods = []
     for month, year in re.findall(MONTH + r"\s+(20\d{2})\b", question, re.I):
