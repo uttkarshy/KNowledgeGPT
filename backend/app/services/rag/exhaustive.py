@@ -148,6 +148,7 @@ def transactions(chunks):
     # retains its existing refusal of unreconcilable mixed representations.
     table_headers = FinancialTableHeaders()
     result = []
+    structured_pages = set()
     for chunk in chunks:
         if (chunk.structure or {}).get("kind") != "table_row":
             continue
@@ -156,6 +157,7 @@ def transactions(chunks):
             continue
         try:
             result.append((*_transaction(cells), chunk))
+            structured_pages.add((chunk.document_id, chunk.page_number))
         except ValueError as exc:
             raise DateEvidenceLimit(
                 "A table transaction contains missing or uncertain cells. No partial calculation was made."
@@ -173,6 +175,8 @@ def transactions(chunks):
             raise DateEvidenceLimit(
                 "Scanned transaction columns could not be reconstructed reliably. Upload a structured export for financial calculations."
             )
+        if (chunk.document_id, chunk.page_number) in structured_pages:
+            continue
         for line in chunk.content.splitlines():
             parts = [p.strip() for p in line.split("|")]
             if len(parts) >= 3 and any(re.fullmatch(r"(date|transaction date|txn date)", p, re.I) for p in parts):
