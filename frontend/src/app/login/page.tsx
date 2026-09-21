@@ -7,6 +7,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { apiJson, setTokens, ApiError } from "@/lib/api-client";
+import { AuthShell } from "@/components/auth-shell";
 
 const loginSchema = z.object({
   email: z.string().email("Enter a valid email address"),
@@ -44,18 +45,19 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-mist-50 dark:bg-ink-950 px-4">
-      <div className="w-full max-w-sm">
-        <div className="mb-8 text-center">
-          <h1 className="font-display text-2xl font-medium text-ink-900 dark:text-mist-50">
-            KnowledgeGPT
+    <AuthShell>
+      <div>
+        <div className="mb-8">
+          <p className="text-sm font-semibold text-stamp-teal">Welcome back</p>
+          <h1 className="mt-2 font-display text-3xl font-semibold tracking-[-0.03em] text-ink-950 dark:text-white">
+            Sign in to your workspace
           </h1>
-          <p className="mt-1 text-sm text-ink-500">Sign in to your workspace</p>
+          <p className="mt-2 text-sm leading-6 text-ink-500">Continue asking questions across your documents.</p>
         </div>
 
         <form
           onSubmit={handleSubmit(onSubmit)}
-          className="rounded-lg border border-mist-200 bg-white p-6 shadow-sm dark:border-ink-700 dark:bg-ink-900"
+          className="surface-card p-6 sm:p-7"
         >
           {serverError && (
             <div className="mb-4 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -69,7 +71,7 @@ export default function LoginPage() {
               type="email"
               autoComplete="email"
               {...register("email")}
-              className="mt-1 w-full rounded-md border border-mist-200 bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-stamp-teal dark:border-ink-700"
+              className="field-control mt-2"
             />
           </label>
           {errors.email && <p className="mt-1 text-xs text-danger">{errors.email.message}</p>}
@@ -80,7 +82,7 @@ export default function LoginPage() {
               type="password"
               autoComplete="current-password"
               {...register("password")}
-              className="mt-1 w-full rounded-md border border-mist-200 bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-stamp-teal dark:border-ink-700"
+              className="field-control mt-2"
             />
           </label>
           {errors.password && <p className="mt-1 text-xs text-danger">{errors.password.message}</p>}
@@ -94,7 +96,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="mt-5 w-full rounded-md bg-stamp-teal py-2 text-sm font-medium text-white transition hover:bg-stamp-tealDark disabled:opacity-60"
+            className="primary-button mt-6 w-full"
           >
             {isSubmitting ? "Signing in…" : "Sign in"}
           </button>
@@ -107,6 +109,6 @@ export default function LoginPage() {
           </Link>
         </p>
       </div>
-    </main>
+    </AuthShell>
   );
 }

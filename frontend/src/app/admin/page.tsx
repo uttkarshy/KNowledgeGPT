@@ -12,6 +12,7 @@ import {
   useUnsuspendUser,
 } from "@/hooks/use-admin";
 import type { AdminUser } from "@/types";
+import { AppShell } from "@/components/app-shell";
 
 function StatCard({ label, value, icon: Icon }: { label: string; value: string | number; icon: React.ElementType }) {
   return (
@@ -104,7 +105,8 @@ export default function AdminPage() {
   const { data: errorLogs = [] } = useErrorLogs();
 
   return (
-    <main className="min-h-screen bg-mist-50 p-6 dark:bg-ink-950">
+    <AppShell>
+    <main className="min-h-screen bg-canvas p-6 dark:bg-ink-950">
       <div className="mx-auto max-w-6xl space-y-8">
         <div>
           <h1 className="font-display text-2xl text-ink-900 dark:text-mist-50">Admin</h1>
@@ -202,5 +204,6 @@ export default function AdminPage() {
         </section>
       </div>
     </main>
+    </AppShell>
   );
 }

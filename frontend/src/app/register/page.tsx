@@ -7,6 +7,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { apiJson, ApiError } from "@/lib/api-client";
+import { AuthShell } from "@/components/auth-shell";
 
 // Mirrors the backend's _validate_password_strength rules exactly, so the
 // user sees the same requirement in the form instead of discovering it only
@@ -58,30 +59,32 @@ export default function RegisterPage() {
 
   if (success) {
     return (
-      <main className="min-h-screen flex items-center justify-center bg-mist-50 dark:bg-ink-950 px-4">
-        <div className="max-w-sm text-center">
-          <h1 className="font-display text-xl text-ink-900 dark:text-mist-50">Account created</h1>
+      <AuthShell>
+        <div className="surface-card p-8 text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-success/10 text-success">✓</div>
+          <h1 className="mt-4 font-display text-2xl font-semibold text-ink-950 dark:text-white">Account created</h1>
           <p className="mt-2 text-sm text-ink-500">
             Your account is ready. If email verification is enabled, check your inbox. Redirecting you to sign in…
           </p>
         </div>
-      </main>
+      </AuthShell>
     );
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-mist-50 dark:bg-ink-950 px-4">
-      <div className="w-full max-w-sm">
-        <div className="mb-8 text-center">
-          <h1 className="font-display text-2xl font-medium text-ink-900 dark:text-mist-50">
+    <AuthShell>
+      <div>
+        <div className="mb-8">
+          <p className="text-sm font-semibold text-stamp-teal">Start with 100 credits</p>
+          <h1 className="mt-2 font-display text-3xl font-semibold tracking-[-0.03em] text-ink-950 dark:text-white">
             Create your workspace
           </h1>
-          <p className="mt-1 text-sm text-ink-500">Start chatting with your own documents</p>
+          <p className="mt-2 text-sm leading-6 text-ink-500">Upload documents, ask grounded questions, and inspect every source.</p>
         </div>
 
         <form
           onSubmit={handleSubmit(onSubmit)}
-          className="rounded-lg border border-mist-200 bg-white p-6 shadow-sm dark:border-ink-700 dark:bg-ink-900"
+          className="surface-card p-6 sm:p-7"
         >
           {serverError && (
             <div className="mb-4 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -94,7 +97,7 @@ export default function RegisterPage() {
             <input
               type="text"
               {...register("full_name")}
-              className="mt-1 w-full rounded-md border border-mist-200 bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-stamp-teal dark:border-ink-700"
+              className="field-control mt-2"
             />
           </label>
 
@@ -104,7 +107,7 @@ export default function RegisterPage() {
               type="email"
               autoComplete="email"
               {...register("email")}
-              className="mt-1 w-full rounded-md border border-mist-200 bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-stamp-teal dark:border-ink-700"
+              className="field-control mt-2"
             />
           </label>
           {errors.email && <p className="mt-1 text-xs text-danger">{errors.email.message}</p>}
@@ -115,7 +118,7 @@ export default function RegisterPage() {
               type="password"
               autoComplete="new-password"
               {...register("password")}
-              className="mt-1 w-full rounded-md border border-mist-200 bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-stamp-teal dark:border-ink-700"
+              className="field-control mt-2"
             />
           </label>
           {errors.password && <p className="mt-1 text-xs text-danger">{errors.password.message}</p>}
@@ -126,7 +129,7 @@ export default function RegisterPage() {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="mt-5 w-full rounded-md bg-stamp-teal py-2 text-sm font-medium text-white transition hover:bg-stamp-tealDark disabled:opacity-60"
+            className="primary-button mt-6 w-full"
           >
             {isSubmitting ? "Creating account…" : "Create account"}
           </button>
@@ -139,6 +142,6 @@ export default function RegisterPage() {
           </Link>
         </p>
       </div>
-    </main>
+    </AuthShell>
   );
 }

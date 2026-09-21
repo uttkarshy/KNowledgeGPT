@@ -18,11 +18,11 @@ export function CitationChip({ index, onClick, isActive }: CitationChipProps) {
       onClick={onClick}
       aria-label={`View source ${index}`}
       className={`
-        mx-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-tab
-        border border-highlight-amberDark/30 bg-highlight-amber/90 px-1.5
-        font-mono text-[11px] font-medium leading-none text-white
-        transition hover:bg-highlight-amberDark
-        ${isActive ? "ring-2 ring-highlight-amberDark ring-offset-1" : ""}
+        mx-0.5 inline-flex h-5 min-w-5 -translate-y-px items-center justify-center rounded-md
+        border border-highlight-amber/25 bg-highlight-amber/10 px-1.5
+        font-mono text-[10px] font-semibold leading-none text-highlight-amberDark
+        transition hover:border-highlight-amber/50 hover:bg-highlight-amber/20
+        ${isActive ? "ring-2 ring-highlight-amber/40 ring-offset-1" : ""}
       `}
     >
       {index}

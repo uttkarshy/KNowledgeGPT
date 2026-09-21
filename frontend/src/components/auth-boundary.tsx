@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ApiError, apiJson, clearTokens, getAccessToken, getRefreshToken } from "@/lib/api-client";
+import { ApiError, apiJson, clearTokens, getAccessToken } from "@/lib/api-client";
 
 export function AuthBoundary({ children }: { children: React.ReactNode }) {
   const path = usePathname();
@@ -30,14 +30,6 @@ export function AuthBoundary({ children }: { children: React.ReactNode }) {
     return () => { active = false; };
   }, [path, protectedPage, queries, router]);
   if (!protectedPage) return <>{children}</>;
-  if (checkedPath !== path || error) return <main className="p-6" role="status">{error || "Opening your workspace…"}</main>;
-  return <>
-    <button className="fixed right-3 top-2 z-30 rounded border bg-white px-2 py-1 text-xs" onClick={async () => {
-      const token = getRefreshToken();
-      try { if (token) await apiJson("/api/auth/logout", { method: "POST", body: JSON.stringify({ refresh_token: token }), skipAuth: true }); }
-      catch { /* Local logout still proceeds when the server is unreachable. */ }
-      finally { clearTokens(); queries.clear(); setCheckedPath(""); router.replace("/login"); }
-    }}>Sign out</button>
-    {children}
-  </>;
+  if (checkedPath !== path || error) return <main className="flex min-h-dvh items-center justify-center bg-canvas p-6" role="status"><div className="text-center"><div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-mist-200 border-t-stamp-teal" /><p className={`mt-4 text-sm ${error ? "text-danger" : "text-ink-500"}`}>{error || "Opening your workspace…"}</p></div></main>;
+  return <>{children}</>;
 }

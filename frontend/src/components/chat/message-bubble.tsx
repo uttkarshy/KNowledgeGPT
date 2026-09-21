@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, User } from "lucide-react";
+import { Sparkles, User } from "lucide-react";
 import { MessageContent } from "@/components/chat/message-content";
 import type { Citation } from "@/types";
 
@@ -30,21 +30,21 @@ export function MessageBubble({
   const isUser = role === "user";
 
   return (
-    <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : ""}`}>
+    <div className={`flex gap-3.5 ${isUser ? "flex-row-reverse" : ""}`}>
       <div
-        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
-          isUser ? "bg-ink-700 text-mist-50" : "bg-stamp-teal text-white"
+        className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${
+          isUser ? "bg-ink-900 text-white" : "bg-stamp-teal/10 text-stamp-teal"
         }`}
       >
-        {isUser ? <User size={14} /> : <Bot size={14} />}
+        {isUser ? <User size={14} /> : <Sparkles size={14} />}
       </div>
 
-      <div className={`max-w-[75%] ${isUser ? "items-end" : "items-start"} flex flex-col`}>
+      <div className={`flex min-w-0 flex-col ${isUser ? "max-w-[85%] items-end sm:max-w-[72%]" : "max-w-[calc(100%-2.875rem)] flex-1 items-start"}`}>
         <div
-          className={`rounded-lg px-4 py-2.5 text-sm ${
+          className={`text-sm ${
             isUser
-              ? "bg-ink-700 text-mist-50"
-              : "border border-mist-200 bg-white text-ink-700 dark:border-ink-700 dark:bg-ink-900 dark:text-mist-100"
+              ? "rounded-2xl rounded-tr-md bg-ink-900 px-4 py-2.5 leading-6 text-white shadow-sm"
+              : "w-full pt-0.5 text-ink-700 dark:text-mist-100"
           }`}
         >
           {isUser ? (
@@ -60,7 +60,7 @@ export function MessageBubble({
         </div>
 
         {!isUser && (modelUsed || latencyMs) && (
-          <div className="mt-1 flex gap-2 font-mono text-[10px] text-ink-500">
+          <div className="mt-2 flex gap-2 font-mono text-[9px] uppercase tracking-wide text-ink-300">
             {modelUsed && <span>{modelUsed}</span>}
             {latencyMs != null && <span>{(latencyMs / 1000).toFixed(1)}s</span>}
             {inputTokens != null && outputTokens != null && (

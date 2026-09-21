@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText } from "lucide-react";
+import { FileText, Quote, ShieldCheck } from "lucide-react";
 import type { Citation } from "@/types";
 
 interface SourcesRailProps {
@@ -14,21 +14,18 @@ interface SourcesRailProps {
 export function SourcesRail({ citations, activeIndex }: SourcesRailProps) {
   if (citations.length === 0) {
     return (
-      <aside className="w-full max-h-40 lg:max-h-none lg:w-72 shrink-0 border-l border-mist-200 p-4 dark:border-ink-700">
-        <h2 className="font-mono text-xs uppercase tracking-wide text-ink-500">Sources</h2>
-        <p className="mt-3 text-sm text-ink-500">
-          Sources for the current answer will appear here.
-        </p>
+      <aside className="hidden w-72 shrink-0 border-l border-ink-950/[0.07] bg-white/40 p-5 dark:border-white/10 dark:bg-ink-900/30 xl:block">
+        <div className="flex items-center gap-2 text-sm font-semibold text-ink-950 dark:text-white"><ShieldCheck size={16} className="text-stamp-teal" /> Sources</div>
+        <div className="mt-5 rounded-2xl border border-dashed border-ink-950/10 p-5 text-center dark:border-white/10"><Quote size={19} className="mx-auto text-ink-300" /><p className="mt-3 text-xs leading-5 text-ink-500">Evidence for the current answer will appear here.</p></div>
       </aside>
     );
   }
 
   return (
-    <aside className="w-full max-h-52 lg:max-h-none lg:w-80 shrink-0 overflow-y-auto border-l border-mist-200 p-4 dark:border-ink-700 scrollbar-thin">
-      <h2 className="font-mono text-xs uppercase tracking-wide text-ink-500">
-        Sources ({citations.length})
-      </h2>
-      <div className="mt-3 space-y-3">
+    <aside className="max-h-[40vh] w-full shrink-0 overflow-y-auto border-t border-ink-950/[0.07] bg-white/70 p-4 backdrop-blur dark:border-white/10 dark:bg-ink-900/60 lg:max-h-none lg:w-80 lg:border-l lg:border-t-0 xl:w-96 xl:p-5 scrollbar-thin">
+      <div className="flex items-center justify-between"><h2 className="flex items-center gap-2 text-sm font-semibold text-ink-950 dark:text-white"><ShieldCheck size={16} className="text-stamp-teal" /> Evidence</h2><span className="rounded-full bg-highlight-amber/10 px-2 py-1 font-mono text-[10px] font-semibold text-highlight-amberDark">{citations.length} {citations.length === 1 ? "source" : "sources"}</span></div>
+      <p className="mt-1 text-xs leading-5 text-ink-500">Inspect the excerpts used for this answer.</p>
+      <div className="mt-4 space-y-3">
         {citations.map((citation, i) => {
           const index = i + 1;
           const isActive = activeIndex === index;
@@ -38,18 +35,18 @@ export function SourcesRail({ citations, activeIndex }: SourcesRailProps) {
             <div
               key={`${citation.document_id}-${citation.page_number}-${i}`}
               id={`source-card-${index}`}
-              className={`rounded-md border bg-white p-3 dark:bg-ink-900 ${
+              className={`relative overflow-hidden rounded-2xl border bg-white p-4 shadow-sm transition dark:bg-ink-900 ${
                 isActive
-                  ? "border-highlight-amber animate-pulse-glow"
-                  : "border-mist-200 dark:border-ink-700"
+                  ? "border-highlight-amber/70 ring-4 ring-highlight-amber/10 animate-pulse-glow"
+                  : "border-ink-950/[0.08] hover:border-highlight-amber/35 dark:border-white/10"
               }`}
             >
               <div className="flex items-start gap-2">
-                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-tab bg-highlight-amber font-mono text-[11px] font-medium text-white">
+                <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-highlight-amber/10 font-mono text-[10px] font-semibold text-highlight-amberDark">
                   {index}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5 text-sm font-medium text-ink-900 dark:text-mist-50">
+                  <div className="flex items-center gap-1.5 text-sm font-semibold text-ink-950 dark:text-white">
                     <FileText size={14} className="shrink-0 text-ink-500" />
                     <span className="truncate">{citation.document_name}</span>
                   </div>
@@ -60,12 +57,12 @@ export function SourcesRail({ citations, activeIndex }: SourcesRailProps) {
                 </div>
               </div>
 
-              <p className="mt-2 line-clamp-4 text-xs leading-relaxed text-ink-700 dark:text-mist-100">
+              <div className="mt-3 border-l-2 border-highlight-amber/30 pl-3"><p className={`${isActive ? "line-clamp-none" : "line-clamp-5"} text-xs leading-5 text-ink-700 dark:text-mist-100`}>
                 {citation.excerpt}
-              </p>
+              </p></div>
 
               <div className="mt-2 flex items-center gap-1.5">
-                <span className="font-mono text-[10px] text-ink-500">match</span>
+                <span className="font-mono text-[9px] uppercase tracking-wide text-ink-300">relevance</span>
                 <div className="flex gap-0.5">
                   {Array.from({ length: 10 }).map((_, dotIndex) => (
                     <span

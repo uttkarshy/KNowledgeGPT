@@ -17,7 +17,7 @@ interface MessageContentProps {
 /** Parse the whole answer before inserting interactive citation markers. */
 export function MessageContent({ content, citations, activeCitationIndex, onCitationClick }: MessageContentProps) {
   return (
-    <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-2 prose-headings:font-display">
+    <div className="answer-content max-w-none text-[15px] leading-7">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight, [rehypeCitations, { count: citations.length }]]}

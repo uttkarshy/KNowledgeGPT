@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { X } from "lucide-react";
 import { useCreateKnowledgeBase } from "@/hooks/use-knowledge-bases";
 
 interface CreateKBDialogProps {
@@ -16,6 +17,12 @@ export function CreateKBDialog({ open, onClose }: CreateKBDialogProps) {
   const [color, setColor] = useState(COLOR_SWATCHES[0]);
   const createKB = useCreateKnowledgeBase();
 
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
   if (!open) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -28,11 +35,17 @@ export function CreateKBDialog({ open, onClose }: CreateKBDialogProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/40 px-4">
-      <div className="w-full max-w-md rounded-lg border border-mist-200 bg-white p-5 shadow-xl dark:border-ink-700 dark:bg-ink-900">
-        <h2 className="font-display text-lg text-ink-900 dark:text-mist-50">New knowledge base</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/45 px-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="create-kb-title">
+      <div className="w-full max-w-lg rounded-2xl border border-white/20 bg-white p-6 shadow-float dark:border-white/10 dark:bg-ink-900 sm:p-7">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 id="create-kb-title" className="font-display text-2xl font-semibold tracking-[-0.02em] text-ink-950 dark:text-white">New knowledge base</h2>
+            <p className="mt-1 text-sm text-ink-500">Create a focused home for related documents.</p>
+          </div>
+          <button type="button" onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-lg text-ink-500 hover:bg-mist-50" aria-label="Close dialog"><X size={18} /></button>
+        </div>
 
-        <form onSubmit={handleSubmit} className="mt-4">
+        <form onSubmit={handleSubmit} className="mt-6">
           {createKB.error && <p role="alert" className="mb-3 text-sm text-danger">{createKB.error.message}</p>}
           <label className="block text-sm font-medium text-ink-700 dark:text-mist-100">
             Name
@@ -40,8 +53,8 @@ export function CreateKBDialog({ open, onClose }: CreateKBDialogProps) {
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="mt-1 w-full rounded-md border border-mist-200 bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-stamp-teal dark:border-ink-700"
-              placeholder="e.g. Product Documentation"
+              className="field-control mt-2"
+              placeholder="e.g. Product documentation"
             />
           </label>
 
@@ -51,21 +64,21 @@ export function CreateKBDialog({ open, onClose }: CreateKBDialogProps) {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
-              className="mt-1 w-full resize-none rounded-md border border-mist-200 bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-stamp-teal dark:border-ink-700"
-              placeholder="Optional"
+              className="field-control mt-2 resize-none"
+              placeholder="What kind of documents will live here? (optional)"
             />
           </label>
 
-          <div className="mt-3">
+          <div className="mt-4">
             <span className="text-sm font-medium text-ink-700 dark:text-mist-100">Color</span>
-            <div className="mt-1.5 flex gap-2">
+            <div className="mt-2 flex gap-3">
               {COLOR_SWATCHES.map((swatch) => (
                 <button
                   key={swatch}
                   type="button"
                   onClick={() => setColor(swatch)}
                   aria-label={`Choose color ${swatch}`}
-                  className="h-6 w-6 rounded-full ring-offset-2 transition"
+                  className="h-7 w-7 rounded-full ring-offset-2 transition hover:scale-110"
                   style={{
                     backgroundColor: swatch,
                     boxShadow: color === swatch ? `0 0 0 2px white, 0 0 0 4px ${swatch}` : undefined,
@@ -75,20 +88,20 @@ export function CreateKBDialog({ open, onClose }: CreateKBDialogProps) {
             </div>
           </div>
 
-          <div className="mt-5 flex justify-end gap-2">
+          <div className="mt-7 flex justify-end gap-2">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md px-3 py-1.5 text-sm text-ink-500 hover:bg-mist-100 dark:hover:bg-ink-800"
+              className="secondary-button"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={createKB.isPending || !name.trim()}
-              className="rounded-md bg-stamp-teal px-4 py-1.5 text-sm font-medium text-white hover:bg-stamp-tealDark disabled:opacity-60"
+              className="primary-button"
             >
-              {createKB.isPending ? "Creating…" : "Create"}
+              {createKB.isPending ? "Creating…" : "Create knowledge base"}
             </button>
           </div>
         </form>

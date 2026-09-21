@@ -11,22 +11,23 @@ module.exports = {
         // reserved ONLY for citations/provenance, never for general UI,
         // so it stays meaningful as "this came from a source."
         ink: {
-          950: "#12151B",
-          900: "#171B22",
-          800: "#1C212B",
-          700: "#2A2E35",
-          500: "#565C66",
-          300: "#9AA0AB",
+          950: "#101512",
+          900: "#18201C",
+          800: "#27312C",
+          700: "#39443E",
+          500: "#68736D",
+          300: "#AAB2AD",
         },
         mist: {
-          50: "#EDEFF2",
-          100: "#E2E5EA",
-          200: "#D3D7DE",
+          50: "#F0F2F0",
+          100: "#E8EBE8",
+          200: "#DCE1DD",
         },
+        canvas: "#F8F9F7",
         stamp: {
-          teal: "#146661",
-          tealLight: "#1C8983",
-          tealDark: "#0E4A46",
+          teal: "#176B5B",
+          tealLight: "#46A08E",
+          tealDark: "#105246",
         },
         highlight: {
           amber: "#D98E2B",
@@ -43,6 +44,7 @@ module.exports = {
       },
       borderRadius: {
         tab: "6px 6px 0 0", // the file-tab citation chip shape
+        card: "16px",
       },
       keyframes: {
         pulseGlow: {
@@ -52,6 +54,10 @@ module.exports = {
       },
       animation: {
         "pulse-glow": "pulseGlow 900ms ease-out 1",
+      },
+      boxShadow: {
+        card: "0 1px 2px rgba(16,21,18,.04), 0 10px 28px rgba(16,21,18,.035)",
+        float: "0 24px 60px rgba(16,21,18,.14)",
       },
     },
   },

@@ -7,7 +7,8 @@
     @apply antialiased;
   }
   body {
-    @apply bg-mist-50 text-ink-700 font-body dark:bg-ink-950 dark:text-mist-100;
+    @apply bg-canvas text-ink-700 font-body dark:bg-ink-950 dark:text-mist-100;
+    text-rendering: optimizeLegibility;
   }
   h1,
   h2,
@@ -17,7 +18,61 @@
   /* Visible keyboard focus everywhere — no invisible-focus dark patterns */
   :focus-visible {
     outline: 2px solid theme("colors.stamp.teal");
-    outline-offset: 2px;
+    outline-offset: 3px;
+  }
+  ::selection {
+    background: rgba(23, 107, 91, 0.18);
+  }
+}
+
+@layer components {
+  .surface-card {
+    @apply rounded-card border border-ink-950/[0.07] bg-white shadow-card dark:border-white/10 dark:bg-ink-900;
+  }
+  .field-control {
+    @apply w-full rounded-xl border border-ink-950/10 bg-white px-3.5 py-2.5 text-sm text-ink-900 shadow-sm outline-none transition placeholder:text-ink-300 hover:border-ink-950/20 focus:border-stamp-teal focus:ring-4 focus:ring-stamp-teal/10 dark:border-white/10 dark:bg-ink-900 dark:text-white;
+  }
+  .primary-button {
+    @apply inline-flex items-center justify-center rounded-xl bg-stamp-teal px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-stamp-teal/20 transition hover:-translate-y-px hover:bg-stamp-tealDark hover:shadow-md disabled:pointer-events-none disabled:opacity-50;
+  }
+  .secondary-button {
+    @apply inline-flex items-center justify-center rounded-xl border border-ink-950/10 bg-white px-4 py-2.5 text-sm font-medium text-ink-700 shadow-sm transition hover:border-ink-950/20 hover:bg-mist-50 hover:text-ink-950 disabled:pointer-events-none disabled:opacity-50 dark:border-white/10 dark:bg-ink-900 dark:text-mist-100;
+  }
+  .answer-content p {
+    @apply my-3 leading-7;
+  }
+  .answer-content h1,
+  .answer-content h2,
+  .answer-content h3 {
+    @apply mb-2 mt-5 font-body font-semibold text-ink-950 dark:text-white;
+  }
+  .answer-content ul,
+  .answer-content ol {
+    @apply my-3 space-y-1.5 pl-5;
+  }
+  .answer-content ul {
+    @apply list-disc;
+  }
+  .answer-content ol {
+    @apply list-decimal;
+  }
+  .answer-content table {
+    @apply my-4 w-full overflow-hidden rounded-lg border border-mist-200 text-left text-sm dark:border-ink-700;
+  }
+  .answer-content th {
+    @apply bg-mist-50 px-3 py-2 font-semibold text-ink-900 dark:bg-ink-800 dark:text-white;
+  }
+  .answer-content td {
+    @apply border-t border-mist-200 px-3 py-2 align-top dark:border-ink-700;
+  }
+  .answer-content a {
+    @apply font-medium text-stamp-teal underline decoration-stamp-teal/30 underline-offset-2;
+  }
+  .answer-content code:not(pre code) {
+    @apply rounded bg-mist-100 px-1.5 py-0.5 font-mono text-[0.88em] dark:bg-ink-800;
+  }
+  .answer-content pre {
+    @apply my-4 overflow-x-auto rounded-xl bg-ink-950 p-4 text-mist-100;
   }
 }
 
@@ -27,6 +82,14 @@
   }
   .scrollbar-thin::-webkit-scrollbar-thumb {
     @apply bg-ink-300/40 rounded-full;
+  }
+  .auth-grid {
+    background-image: linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: linear-gradient(to bottom right, black, transparent 82%);
+  }
+  .text-balance {
+    text-wrap: balance;
   }
 }
 

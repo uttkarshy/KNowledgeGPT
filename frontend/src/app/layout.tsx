@@ -23,8 +23,11 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "KnowledgeGPT",
-  description: "Enterprise AI Knowledge Management Platform",
+  title: {
+    default: "KnowledgeGPT — Talk to your knowledge",
+    template: "%s · KnowledgeGPT",
+  },
+  description: "Ask questions across your documents and verify every answer with page-level citations.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
