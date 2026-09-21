@@ -39,10 +39,13 @@ export async function* streamChatAnswer(
       language: options?.language,
     }),
     signal: options?.signal,
+    headers: { "Idempotency-Key": crypto.randomUUID() },
   });
 
   if (!response.ok || !response.body) {
-    throw new Error(`Chat stream request failed: ${response.status}`);
+    let detail = `Chat stream request failed: ${response.status}`;
+    try { detail = String((await response.json()).detail || detail); } catch { /* non-JSON */ }
+    throw new Error(detail);
   }
 
   const reader = response.body.getReader();

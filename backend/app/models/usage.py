@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
-from sqlalchemy import Enum, Float, ForeignKey, Integer, String
+from sqlalchemy import Enum, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -16,6 +16,7 @@ class ApiUsageLog(Base, UUIDPKMixin, TimestampMixin):
     (API usage, embedding usage, cost estimation, latency)."""
 
     __tablename__ = "api_usage_logs"
+    __table_args__ = (UniqueConstraint("idempotency_key", name="uq_api_usage_idempotency_key"),)
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
@@ -30,6 +31,10 @@ class ApiUsageLog(Base, UUIDPKMixin, TimestampMixin):
 
     status_code: Mapped[int] = mapped_column(Integer, default=200, nullable=False)
     error_message: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    operation: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    credits_delta: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    usage_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
 
 class AuditLog(Base, UUIDPKMixin, TimestampMixin):

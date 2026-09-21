@@ -5,7 +5,7 @@ import json
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +20,7 @@ from app.schemas.chat import (
     ChatSessionPublic,
     CreateSessionRequest,
 )
-from app.services import chat_service
+from app.services import chat_service, credit_service
 from app.services.llm import get_llm_provider
 from app.services.llm.base import LLMProvider
 from app.services.rag.engine import answer_question
@@ -72,6 +72,7 @@ async def ask_question(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     provider: LLMProvider = Depends(get_llm_provider),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     """Streams a RAG-grounded, cited answer as Server-Sent Events.
 
@@ -90,6 +91,16 @@ async def ask_question(
     await enforce_limit(settings, key=f"chat:{current_user.id}", limit=settings.RATE_LIMIT_CHAT_PER_MINUTE)
     await enforce_limit(settings, key=f"chat_daily:{current_user.id}", limit=settings.RATE_LIMIT_CHAT_PER_DAY, seconds=86400)
     await enforce_limit(settings, key="chat_global", limit=settings.RATE_LIMIT_GLOBAL_CHAT_PER_DAY, seconds=86400)
+    charge_key = f"chat:{current_user.id}:{idempotency_key or uuid.uuid4()}"
+    try:
+        await credit_service.charge(
+            db, user_id=current_user.id, credits=settings.CHAT_CREDITS,
+            operation="chat.answer", idempotency_key=charge_key,
+            model=settings.LLM_CHAT_MODEL, metadata={"session_id": str(session_id)},
+        )
+        await db.commit()
+    except credit_service.InsufficientCreditsError as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
 
     async def event_stream():
         try:
@@ -101,6 +112,12 @@ async def ask_question(
                         await db.commit()  # terminal success means persisted, even after immediate refresh
                     elif event.type == "error":
                         await db.rollback()
+                        await credit_service.refund(
+                            db, user_id=current_user.id, credits=settings.CHAT_CREDITS,
+                            operation="chat.refund", idempotency_key=f"refund:{charge_key}",
+                            metadata={"reason": "answer_failed"},
+                        )
+                        await db.commit()
                     payload = {
                         "type": event.type, "delta": event.delta,
                         "message_id": str(event.message_id) if event.message_id else None,
@@ -112,6 +129,12 @@ async def ask_question(
             raise
         except Exception as exc:
             await db.rollback()
+            await credit_service.refund(
+                db, user_id=current_user.id, credits=settings.CHAT_CREDITS,
+                operation="chat.refund", idempotency_key=f"refund:{charge_key}",
+                metadata={"reason": "stream_failed"},
+            )
+            await db.commit()
             logging.getLogger(__name__).error("chat_failed session=%s category=%s", session_id, type(exc).__name__)
             yield 'data: {"type":"error","error":"The answer could not be saved or completed. Please retry."}\n\n'
 

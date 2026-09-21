@@ -35,6 +35,8 @@ export interface DocumentSummary {
   next_retry_at?: string | null;
   processing_progress_pct: number;
   page_count: number | null;
+  processed_page_count?: number;
+  estimated_credits?: number | null;
   chunk_count: number;
   original_size_bytes: number;
   created_at: string;
@@ -80,11 +82,15 @@ export interface UserPublic {
   full_name: string | null;
   role: "admin" | "user" | "ai";
   is_verified: boolean;
+  plan_code: string;
+  credit_balance: number;
 }
 
 export interface AdminUser {
   id: string;
   email: string;
+  plan_code: string;
+  credit_balance: number;
   full_name: string | null;
   role: "admin" | "user" | "ai";
   is_active: boolean;
@@ -117,6 +123,8 @@ export interface ApiUsageLogEntry {
   model: string | null;
   input_tokens: number;
   output_tokens: number;
+  operation?: string | null;
+  credits_delta?: number;
   latency_ms: number | null;
   status_code: number;
   created_at: string;

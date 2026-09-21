@@ -77,6 +77,8 @@ export function useAskQuestion(sessionId: string | null) {
         setIsStreaming(false);
         queryClient.invalidateQueries({ queryKey: ["chat-messages", sessionId] });
         queryClient.invalidateQueries({ queryKey: ["chat-sessions"] });
+        queryClient.invalidateQueries({ queryKey: ["credits"] });
+        queryClient.invalidateQueries({ queryKey: ["credit-usage"] });
       }
     },
     [sessionId, queryClient]

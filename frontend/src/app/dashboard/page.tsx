@@ -4,6 +4,7 @@ import { Plus, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { CreateKBDialog } from "@/components/dashboard/create-kb-dialog";
+import { CreditsCard } from "@/components/dashboard/credits-card";
 import { DocumentsPanel } from "@/components/dashboard/documents-panel";
 import { KBCard } from "@/components/dashboard/kb-card";
 import { StatsOverview } from "@/components/dashboard/stats-overview";
@@ -43,6 +44,7 @@ export default function DashboardPage() {
         <div className="mt-5">
           <StatsOverview knowledgeBases={knowledgeBases} />
         </div>
+        <CreditsCard />
 
         <div className="mt-6 flex items-center gap-2 rounded-md border border-mist-200 bg-white px-3 py-2 dark:border-ink-700 dark:bg-ink-900">
           <Search size={15} className="text-ink-500" />

@@ -116,8 +116,9 @@ class Settings(BaseSettings):
     MAX_DOCUMENTS_PER_USER: int = Field(default=100, gt=0)
     MAX_STORAGE_BYTES_PER_USER: int = Field(default=250 * 1024 * 1024, gt=0)
     MAX_KNOWLEDGE_BASES_PER_USER: int = Field(default=20, gt=0)
-    MAX_CHUNKS_PER_DOCUMENT: int = Field(default=1000, gt=0)
-    MAX_PDF_PAGES: int = Field(default=200, gt=0)
+    MAX_CHUNKS_PER_DOCUMENT: int = Field(default=5000, gt=0)
+    MAX_PDF_PAGES: int = Field(default=500, gt=0)
+    PDF_PAGE_BATCH_SIZE: int = Field(default=25, ge=1, le=50)
     EMBEDDING_BATCH_SIZE: int = Field(default=16, ge=1, le=100)
     EMBEDDING_MAX_INPUT_BYTES: int = Field(default=1800, ge=256, le=2000)
     RATE_LIMIT_CHAT_PER_MINUTE: int = Field(default=10, gt=0)
@@ -127,6 +128,13 @@ class Settings(BaseSettings):
     RATE_LIMIT_GLOBAL_UPLOADS_PER_DAY: int = Field(default=20, gt=0)
     REGISTRATION_ENABLED: bool = False  # enable deliberately after configuring abuse controls
     GOOGLE_OAUTH_ENABLED: bool = False
+    STARTER_CREDITS: int = Field(default=100, ge=0)
+    CHAT_CREDITS: int = Field(default=1, ge=0)
+    DOCUMENT_CREDITS_PER_PAGE: int = Field(default=1, ge=0)
+    RAZORPAY_KEY_ID: Optional[str] = None
+    RAZORPAY_KEY_SECRET: Optional[str] = None
+    RAZORPAY_WEBHOOK_SECRET: Optional[str] = None
+    CREDIT_PACKS: dict[str, dict[str, int]] = Field(default_factory=dict)
     ALLOWED_FILE_EXTENSIONS: list[str] = Field(
         default_factory=lambda: [
             "pdf", "docx", "txt", "csv", "xlsx", "pptx",

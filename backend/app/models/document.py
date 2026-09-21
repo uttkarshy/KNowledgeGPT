@@ -105,6 +105,8 @@ class Document(Base, UUIDPKMixin, TimestampMixin):
         Integer,
         nullable=True,
     )
+    processed_page_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    estimated_credits: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     chunk_count: Mapped[int] = mapped_column(
         Integer,

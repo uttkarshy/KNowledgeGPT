@@ -33,7 +33,7 @@ export function DocumentsPanel({ knowledgeBaseId, onClose }: DocumentsPanelProps
   const limits = useUploadLimits();
   const retryProcessing = useRetryProcessing(knowledgeBaseId);
   const deleteDocument = useDeleteDocument(knowledgeBaseId);
-  const { upload, stage, progress, error } = useUploadDocument(knowledgeBaseId);
+  const { upload, confirmProcessing, pendingDocument, stage, progress, error } = useUploadDocument(knowledgeBaseId);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -69,6 +69,12 @@ export function DocumentsPanel({ knowledgeBaseId, onClose }: DocumentsPanelProps
             : "Loading upload limits…"}</p>
           {limits.error && <p role="alert" className="text-xs text-danger">Upload limits unavailable. <button onClick={() => limits.refetch()}>Try again</button></p>}
           {stage === "done" && <p role="status" className="mt-2 text-xs">Upload received. Processing will continue below.</p>}
+          {stage === "awaiting-confirmation" && pendingDocument && (
+            <div className="mt-3 rounded-md bg-mist-50 p-3 text-xs dark:bg-ink-800">
+              <p>{pendingDocument.page_count ?? 1} page(s) · approximately {pendingDocument.estimated_credits ?? 1} credits</p>
+              <button onClick={confirmProcessing} className="mt-2 rounded bg-stamp-teal px-3 py-1.5 text-white">Start processing</button>
+            </div>
+          )}
           {error && <p className="mt-2 text-xs text-danger">{error}</p>}
         </div>
 
@@ -94,6 +100,7 @@ export function DocumentsPanel({ knowledgeBaseId, onClose }: DocumentsPanelProps
                       {doc.status !== "completed" && doc.status !== "failed" && (
                         <span>· {doc.processing_progress_pct}%</span>
                       )}
+                      {(doc.page_count ?? 0) > 0 && doc.status !== "completed" && <span>· {doc.processed_page_count ?? 0}/{doc.page_count} pages</span>}
                       {doc.status === "completed" && <span>· {doc.chunk_count} chunks</span>}
                     </div>
                     {doc.status_detail && (
@@ -135,6 +142,10 @@ function stageLabel(stage: string): string {
       return "Uploading…";
     case "confirming":
       return "Confirming…";
+    case "estimating":
+      return "Checking pages and credits…";
+    case "awaiting-confirmation":
+      return "Ready to process";
     default:
       return "Working…";
   }

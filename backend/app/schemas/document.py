@@ -40,6 +40,8 @@ class DocumentPublic(BaseModel):
     next_retry_at: Optional[datetime] = None
     processing_progress_pct: int
     page_count: Optional[int] = None
+    processed_page_count: int = 0
+    estimated_credits: Optional[int] = None
     chunk_count: int
     original_size_bytes: int
     version: int
@@ -57,3 +59,6 @@ class DocumentStatusResponse(BaseModel):
     retryable: bool = False
     next_retry_at: Optional[datetime] = None
     processing_progress_pct: int
+    page_count: Optional[int] = None
+    processed_page_count: int = 0
+    estimated_credits: Optional[int] = None

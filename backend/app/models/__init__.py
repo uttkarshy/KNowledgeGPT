@@ -4,6 +4,7 @@ Import every model here so:
   2. Application code can `from app.models import User, Document, ...`.
 """
 
+from app.models.billing import CreditPurchase
 from app.models.chat import ChatCitation, ChatMessage, ChatSession
 from app.models.chunk import DocumentChunk
 from app.models.document import Document
@@ -22,4 +23,5 @@ __all__ = [
     "ChatCitation",
     "ApiUsageLog",
     "AuditLog",
+    "CreditPurchase",
 ]

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import re
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -8,7 +10,7 @@ from typing import Optional
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.aws import S3Error, build_upload_key, generate_presigned_put_url, head_object_size
+from app.core.aws import S3Error, build_upload_key, download_to_path, generate_presigned_put_url, head_object_size
 from app.core.config import Settings
 from app.models.document import Document
 from app.models.enums import DocumentStatus, FileType
@@ -30,6 +32,35 @@ class DocumentNotFoundError(DocumentServiceError):
 
 class UploadNotFoundInS3Error(DocumentServiceError):
     pass
+
+
+async def estimate_processing(
+    db: AsyncSession, *, settings: Settings, document_id: uuid.UUID, owner_id: uuid.UUID
+) -> Document:
+    document = await db.scalar(select(Document).where(
+        Document.id == document_id, Document.owner_id == owner_id
+    ).with_for_update())
+    if not document:
+        raise DocumentNotFoundError("Document not found")
+    if document.status != DocumentStatus.PENDING or not document.temp_storage_key:
+        raise DocumentServiceError("Only a completed pending upload can be estimated")
+    try:
+        actual_size = head_object_size(settings=settings, key=document.temp_storage_key)
+    except S3Error as exc:
+        raise UploadNotFoundInS3Error("Could not find the uploaded file in storage.") from exc
+    if actual_size != document.original_size_bytes:
+        raise DocumentServiceError("Uploaded size does not match the expected file size")
+    pages = 1
+    if document.file_type == FileType.PDF:
+        from app.services.extraction.pdf_extractor import PDFExtractor
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, "estimate.pdf")
+            download_to_path(settings=settings, key=document.temp_storage_key, destination_path=path)
+            pages = PDFExtractor().page_count(path, settings=settings)
+    document.page_count = pages if document.file_type == FileType.PDF else None
+    document.estimated_credits = max(1, pages) * settings.DOCUMENT_CREDITS_PER_PAGE
+    await db.flush()
+    return document
 
 
 _EXTENSION_TO_FILE_TYPE = {
@@ -145,6 +176,13 @@ async def confirm_upload_and_enqueue(
         document.status_detail = "Uploaded size does not match the allowed file size"
         await db.commit()
         raise DocumentServiceError(document.status_detail)
+    if document.estimated_credits is None:
+        raise DocumentServiceError("Estimate processing cost before confirmation")
+    user = await db.scalar(select(User).where(User.id == owner_id).with_for_update())
+    if not user or user.credit_balance < document.estimated_credits:
+        raise DocumentServiceError(
+            f"Insufficient KnowledgeGPT Credits. This document needs approximately {document.estimated_credits}."
+        )
     document.confirmed_at = datetime.now(timezone.utc)
     document.status = DocumentStatus.VIRUS_SCANNING
     document.processing_progress_pct = 5

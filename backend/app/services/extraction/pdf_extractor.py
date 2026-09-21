@@ -44,7 +44,30 @@ def _heading_level_for_span(span_size: float, body_size: float) -> int | None:
 
 
 class PDFExtractor(TextExtractor):
+    def page_count(self, file_path: str, *, settings: Settings) -> int:
+        try:
+            with fitz.open(file_path) as doc:
+                if doc.is_encrypted:
+                    raise ProcessingFailure("encrypted_pdf", "This PDF is encrypted. Upload an unlocked copy.")
+                count = len(doc)
+        except ProcessingFailure:
+            raise
+        except Exception as e:
+            raise ExtractionError(f"Could not open PDF: {e}") from e
+        if count > settings.MAX_PDF_PAGES:
+            raise ProcessingFailure(
+                "page_limit_exceeded",
+                f"This PDF contains {count} pages. KnowledgeGPT supports up to {settings.MAX_PDF_PAGES} pages per document.",
+            )
+        return count
+
     def extract(self, file_path: str, *, settings: Settings) -> ExtractedDocument:
+        count = self.page_count(file_path, settings=settings)
+        return self.extract_range(file_path, settings=settings, start_page=1, end_page=count)
+
+    def extract_range(
+        self, file_path: str, *, settings: Settings, start_page: int, end_page: int
+    ) -> ExtractedDocument:
         try:
             doc = fitz.open(file_path)
         except Exception as e:  # PyMuPDF raises its own RuntimeError/fitz errors
@@ -54,17 +77,16 @@ class PDFExtractor(TextExtractor):
         if doc.is_encrypted:
             doc.close()
             raise ProcessingFailure("encrypted_pdf", "This PDF is encrypted. Upload an unlocked copy.")
-        if len(doc) > settings.MAX_PDF_PAGES:
-            count = len(doc)
+        total_pages = len(doc)
+        if total_pages > settings.MAX_PDF_PAGES:
             doc.close()
-            raise ProcessingFailure(
-                "page_limit_exceeded",
-                f"This PDF contains {count} pages. KnowledgeGPT Beta currently supports up to {settings.MAX_PDF_PAGES} pages per document. Split it into smaller files.",
-            )
+            raise ProcessingFailure("page_limit_exceeded", f"This PDF contains {total_pages} pages. KnowledgeGPT supports up to {settings.MAX_PDF_PAGES} pages per document.")
+        start_page = max(1, start_page)
+        end_page = min(total_pages, end_page)
         current_section_title: str | None = None
 
         try:
-            for page_index in range(len(doc)):
+            for page_index in range(start_page - 1, end_page):
                 page = doc[page_index]
                 page_number = page_index + 1
                 native_text = page.get_text("text").strip()
@@ -94,7 +116,7 @@ class PDFExtractor(TextExtractor):
         finally:
             doc.close()
 
-        return ExtractedDocument(pages=pages, detected_language=None, page_count=len(pages))
+        return ExtractedDocument(pages=pages, detected_language=None, page_count=total_pages)
 
     def _extract_native_blocks(
         self, page: "fitz.Page", page_number: int, current_section_title: str | None

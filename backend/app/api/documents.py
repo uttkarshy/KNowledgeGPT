@@ -86,7 +86,27 @@ async def confirm_upload(
         error_code=document.error_code,
         retryable=document.retryable,
         next_retry_at=document.next_retry_at,
+        page_count=document.page_count,
+        processed_page_count=document.processed_page_count,
+        estimated_credits=document.estimated_credits,
     )
+
+
+@router.post("/{document_id}/estimate", response_model=DocumentPublic)
+async def estimate_document(
+    document_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    try:
+        return await document_service.estimate_processing(
+            db, settings=settings, document_id=document_id, owner_id=current_user.id
+        )
+    except document_service.DocumentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (document_service.DocumentServiceError, document_service.UploadNotFoundInS3Error) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/{document_id}/status", response_model=DocumentStatusResponse)
@@ -109,6 +129,9 @@ async def get_document_status(
         error_code=document.error_code,
         retryable=document.retryable,
         next_retry_at=document.next_retry_at,
+        page_count=document.page_count,
+        processed_page_count=document.processed_page_count,
+        estimated_credits=document.estimated_credits,
     )
 
 
@@ -144,6 +167,7 @@ async def upload_limits(
 ):
     return {"max_size_bytes": settings.MAX_UPLOAD_SIZE_BYTES,
             "max_pdf_pages": settings.MAX_PDF_PAGES,
+            "credits_per_page": settings.DOCUMENT_CREDITS_PER_PAGE,
             "allowed_extensions": sorted(settings.ALLOWED_FILE_EXTENSIONS)}
 
 

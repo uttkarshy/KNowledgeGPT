@@ -24,7 +24,7 @@ def test_limits_are_authenticated_and_use_configured_values():
         assert response.status_code == 200
         assert response.json()["max_pdf_pages"] == 37
         assert response.json()["max_size_bytes"] == 1048576
-        assert set(response.json()) == {"max_pdf_pages", "max_size_bytes", "allowed_extensions"}
+        assert set(response.json()) == {"max_pdf_pages", "max_size_bytes", "allowed_extensions", "credits_per_page"}
     finally:
         app.dependency_overrides.clear()
 

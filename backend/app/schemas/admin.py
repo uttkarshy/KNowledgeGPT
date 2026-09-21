@@ -19,6 +19,8 @@ class AdminUserPublic(BaseModel):
     is_suspended: bool
     last_login_at: Optional[datetime] = None
     created_at: datetime
+    plan_code: str
+    credit_balance: int
 
     model_config = {"from_attributes": True}
 
@@ -52,6 +54,8 @@ class ApiUsageLogPublic(BaseModel):
     model: Optional[str] = None
     input_tokens: int
     output_tokens: int
+    operation: Optional[str] = None
+    credits_delta: int = 0
     latency_ms: Optional[int] = None
     status_code: int
     created_at: datetime

@@ -33,6 +33,7 @@ export interface UploadLimits {
   max_size_bytes: number;
   max_pdf_pages: number;
   allowed_extensions: string[];
+  credits_per_page: number;
 }
 
 export function useUploadLimits() {
@@ -47,7 +48,7 @@ export function useRetryProcessing(knowledgeBaseId: string | null) {
   });
 }
 
-export type UploadStage = "idle" | "requesting-url" | "uploading" | "confirming" | "done" | "error";
+export type UploadStage = "idle" | "requesting-url" | "uploading" | "estimating" | "awaiting-confirmation" | "confirming" | "done" | "error";
 
 /**
  * Drives the full 3-step upload flow built in the Upload Service increment:
@@ -60,6 +61,7 @@ export function useUploadDocument(knowledgeBaseId: string | null) {
   const [stage, setStage] = useState<UploadStage>("idle");
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const [pendingDocument, setPendingDocument] = useState<DocumentSummary | null>(null);
 
   const upload = async (file: File) => {
     if (!knowledgeBaseId) return;
@@ -88,15 +90,11 @@ export function useUploadDocument(knowledgeBaseId: string | null) {
       setStage("uploading");
       await uploadWithProgress(upload_url, file, setProgress);
 
-      setStage("confirming");
-      await apiJson("/api/documents/confirm", {
-        method: "POST",
-        body: JSON.stringify({ document_id }),
-      });
-
-      setStage("done");
+      setStage("estimating");
+      const estimate = await apiJson<DocumentSummary>(`/api/documents/${document_id}/estimate`, { method: "POST" });
+      setPendingDocument(estimate);
+      setStage("awaiting-confirmation");
       queryClient.invalidateQueries({ queryKey: ["documents", knowledgeBaseId] });
-      queryClient.invalidateQueries({ queryKey: ["knowledge-bases"] });
     } catch (e) {
       queryClient.invalidateQueries({ queryKey: ["documents", knowledgeBaseId] });
       setStage("error");
@@ -104,7 +102,27 @@ export function useUploadDocument(knowledgeBaseId: string | null) {
     }
   };
 
-  return { upload, stage, progress, error };
+  const confirmProcessing = async () => {
+    if (!pendingDocument) return;
+    try {
+      setStage("confirming");
+      await apiJson("/api/documents/confirm", {
+        method: "POST",
+        body: JSON.stringify({ document_id: pendingDocument.id }),
+      });
+      setPendingDocument(null);
+      setStage("done");
+      queryClient.invalidateQueries({ queryKey: ["documents", knowledgeBaseId] });
+      queryClient.invalidateQueries({ queryKey: ["knowledge-bases"] });
+      queryClient.invalidateQueries({ queryKey: ["credits"] });
+    } catch (e) {
+      queryClient.invalidateQueries({ queryKey: ["documents", knowledgeBaseId] });
+      setStage("error");
+      setError(e instanceof Error ? e.message : "Upload failed");
+    }
+  };
+
+  return { upload, confirmProcessing, pendingDocument, stage, progress, error };
 }
 
 /** Plain XHR (not fetch) specifically so we get upload progress events —

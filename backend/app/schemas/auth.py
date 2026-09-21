@@ -58,6 +58,8 @@ class UserPublic(BaseModel):
     full_name: Optional[str] = None
     role: str
     is_verified: bool
+    plan_code: str
+    credit_balance: int
 
     model_config = {"from_attributes": True}
 

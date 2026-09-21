@@ -16,6 +16,8 @@ class User(Base, UUIDPKMixin, TimestampMixin):
     __tablename__ = "users"
 
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    plan_code: Mapped[str] = mapped_column(String(32), nullable=False, default="starter", server_default="starter")
+    credit_balance: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100")
 
     email: Mapped[str] = mapped_column(
         String(320),

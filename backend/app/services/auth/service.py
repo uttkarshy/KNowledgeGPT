@@ -73,6 +73,7 @@ async def register_user(
         auth_provider=AuthProvider.PASSWORD,
         is_verified=False,
         email_verification_token=hash_token(verification_token),
+        credit_balance=settings.STARTER_CREDITS,
     )
     db.add(user)
     await db.flush()  # populate user.id without committing yet
@@ -119,6 +120,7 @@ async def get_or_create_google_user(
         user.last_login_at = datetime.now(timezone.utc)
         return user
 
+    settings = get_settings()
     user = User(
         email=google_info.email,
         hashed_password=None,
@@ -128,6 +130,7 @@ async def get_or_create_google_user(
         google_id=google_info.sub,
         is_verified=google_info.email_verified,
         last_login_at=datetime.now(timezone.utc),
+        credit_balance=settings.STARTER_CREDITS,
     )
     db.add(user)
     await db.flush()
