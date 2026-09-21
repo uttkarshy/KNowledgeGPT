@@ -17,6 +17,7 @@ from app.services.rag.retrieval import RetrievalFilters, RetrievedChunk
     "question,strategy",
     [
         ("What is my highest qualification?", "semantic"),
+        ("What is my highest educational qualification, and where did I complete it?", "semantic"),
         ("How much did I spend on 30 July 2026?", "exact_date"),
         ("Total withdrawals on 31 July 2026", "exact_date"),
         ("What were my 3 largest expenses in July 2026?", "analytical"),
