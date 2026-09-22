@@ -1,7 +1,5 @@
-import re
 import uuid
 from datetime import date
-from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -10,9 +8,9 @@ from sqlalchemy.dialects import postgresql
 
 from app.core.config import get_settings
 from app.models.chat import ChatSession
-from app.schemas.llm import EmbeddingResult, LLMStreamChunk, LLMUsage
+from app.schemas.llm import ChatMessage, MessageRole
 from app.services.rag import engine, exact_date
-from app.services.rag.retrieval import RetrievalFilters, RetrievedChunk
+from app.services.rag.retrieval import RetrievalFilters
 
 
 def statement():
@@ -50,35 +48,51 @@ def test_ordinary_query_keeps_semantic_path():
     assert exact_date.explicit_date('What is our policy?') is None
 
 
-async def test_first_answer_includes_all_pages_beyond_vector_top_k(monkeypatch):
+async def test_exact_date_financial_answer_is_exhaustive_and_deterministic(monkeypatch):
     rows = statement()
     db = database(rows)
     db.add = lambda obj: None
     db.flush = AsyncMock()
-    monkeypatch.setattr(engine, '_fetch_recent_history', AsyncMock(return_value=[]))
-    semantic = [RetrievedChunk(rows[0].id, rows[0].document_id, 'Statement.pdf', rows[0].content, 1, None, .9)]
-    monkeypatch.setattr(engine, 'similarity_search', AsyncMock(return_value=semantic))
 
-    class Provider:
-        async def embed(self, request):
-            return EmbeddingResult(embeddings=[[.1] * 1536], dimensions=1536, model='gemini-embedding-001', usage=LLMUsage())
-
-        async def stream(self, request):
-            # Deterministic generation oracle: only amounts actually delivered
-            # in the first prompt count. A top-K-only implementation gives 1000.
-            prompt = request.messages[-1].content
-            amounts = [Decimal(v) for v in re.findall(r'Debit (\d+\.\d{2})', prompt)]
-            total = sum(amounts)
-            assert total == Decimal('1715.89')
-            yield LLMStreamChunk(delta=f'{total:.2f} [1] [2] [4]')
+    # Simulate a prior answer in the same chat. Exact-date financial arithmetic
+    # must not depend on conversation history or invoke the model.
+    history = [
+        ChatMessage(
+            role=MessageRole.USER,
+            content="What were my 3 largest expenses in July 2026?",
+        ),
+        ChatMessage(
+            role=MessageRole.ASSISTANT,
+            content="Rent ₹14,500; Electronics ₹12,499; Flight ₹6,890.",
+        ),
+    ]
+    monkeypatch.setattr(
+        engine,
+        '_fetch_recent_history',
+        AsyncMock(return_value=history),
+    )
+    provider = AsyncMock()
 
     session = ChatSession(id=uuid.uuid4(), owner_id=uuid.uuid4(), knowledge_base_id=uuid.uuid4())
-    events = [event async for event in engine.answer_question(db, settings=get_settings(), provider=Provider(),
-              session=session, question='calculate how much did i spent on 31 jul 2026')]
+    events = [
+        event
+        async for event in engine.answer_question(
+            db,
+            settings=get_settings(),
+            provider=provider,
+            session=session,
+            question='How much did I spend on 31 July 2026? List every expense from that date and give the total.',
+        )
+    ]
+
     assert events[-1].type == 'done'
-    assert '1715.89' in events[0].delta
+    assert '1,715.89' in events[0].delta
+    assert '1,000.00' in events[0].delta
+    assert '406.89' in events[0].delta
+    assert '309.00' in events[0].delta
     assert {c['page_number'] for c in events[-1].citations} >= {1, 2, 4}
-    engine.similarity_search.assert_awaited_once()
+    provider.embed.assert_not_called()
+    provider.stream.assert_not_called()
 
 
 async def test_date_sql_isolation_and_filters():

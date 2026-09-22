@@ -223,7 +223,9 @@ def calculate(chunks, plan, question):
     rows = [
         r
         for r in transactions(chunks)
-        if r[3] == direction and (not plan.periods or any(a <= r[0] <= b for a, b in plan.periods))
+        if r[3] == direction
+        and (plan.target is None or r[0] == plan.target)
+        and (not plan.periods or any(a <= r[0] <= b for a, b in plan.periods))
     ]
     if not rows:
         raise DateEvidenceLimit(
@@ -247,6 +249,14 @@ def calculate(chunks, plan, question):
             description = re.sub(r"[\n\r|`<>\[\]]", " ", description)
             row_refs = " ".join(f"[{indices[c.chunk_id]}]" for c in row_sources)
             text += f"| {day.isoformat()} | {description} | ₹{amount:,.2f} | {row_refs} |\n"
+    elif plan.operation == "sum" and plan.target is not None:
+        total = sum((r[2] for r in rows), Decimal(0))
+        text = f"Analyzed {len(rows)} complete {direction} rows.\n\n| Date | Description | Amount | Source |\n|---|---|---:|---|\n"
+        for day, description, amount, _, *row_sources in rows:
+            description = re.sub(r"[\n\r|`<>\[\]]", " ", description)
+            row_refs = " ".join(f"[{indices[c.chunk_id]}]" for c in row_sources)
+            text += f"| {day.isoformat()} | {description} | ₹{amount:,.2f} | {row_refs} |\n"
+        text += f"\nTotal: **₹{total:,.2f}** across {len(rows)} {direction} transactions. {refs}"
     elif plan.operation == "count":
         text = f"Count: **{len(rows)} {direction} transactions**. {refs}"
     elif plan.operation == "compare":

@@ -1,5 +1,4 @@
 import uuid
-from dataclasses import replace
 from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -53,7 +52,8 @@ def fixture():
 
 @pytest.mark.parametrize("day,total", [(30, "1,844.00"), (31, "1,715.89")])
 def test_complete_decimal_totals(day, total):
-    plan = replace(route("total expenses in July 2026"), periods=((date(2026, 7, day), date(2026, 7, day)),))
+    plan = route(f"total expenses on {day} July 2026")
+    assert plan.strategy == "exact_date" and plan.financial and plan.target == date(2026, 7, day)
     answer, sources = calculate(fixture(), plan, "expenses")
     assert total in answer and len(sources) == (6 if day == 30 else 3)
 

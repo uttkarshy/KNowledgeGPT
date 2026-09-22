@@ -69,23 +69,29 @@ def route(question: str) -> QueryPlan:
         target = None
     else:
         target = explicit_date(question)
+    operation = "all"
+    for pattern, value in [
+        (r"largest|highest|\btop\b", "top"),
+        (r"lowest|smallest", "bottom"),
+        (r"average", "average"),
+        (r"count|how many", "count"),
+        (r"compare", "compare"),
+        (r"total|sum|how much", "sum"),
+    ]:
+        if re.search(pattern, question, re.I):
+            operation = value
+            break
     if target:
-        return QueryPlan(strategy="exact_date", target=target, filename=filename)
+        return QueryPlan(
+            strategy="exact_date",
+            target=target,
+            operation=operation,
+            financial=financial,
+            filename=filename,
+        )
     if analytical or (financial and periods):
         if re.search(MONTH, question, re.I) and not periods:
             raise DateEvidenceLimit("Include a four-digit year with the month.")
-        operation = "all"
-        for pattern, value in [
-            (r"largest|highest|\btop\b", "top"),
-            (r"lowest|smallest", "bottom"),
-            (r"average", "average"),
-            (r"count|how many", "count"),
-            (r"compare", "compare"),
-            (r"total|sum|how much", "sum"),
-        ]:
-            if re.search(pattern, question, re.I):
-                operation = value
-                break
         match = re.search(r"\btop\s+(\d+)|\b(\d+)\s+(?:largest|highest|lowest|smallest)", question, re.I)
         count = int(next(g for g in match.groups() if g)) if match else 3
         if not 1 <= count <= 20:

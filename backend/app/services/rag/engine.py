@@ -140,6 +140,8 @@ async def answer_question(
         if target:
             date_context = await exact_date_evidence(db, target=target, owner_id=session.owner_id,
                                                     knowledge_base_id=session.knowledge_base_id, filters=filters)
+            if plan.financial:
+                direct_answer, date_context = calculate(date_context, plan, question)
     except DateEvidenceLimit as exc:
         limitation = str(exc)
     if limitation:
@@ -152,6 +154,8 @@ async def answer_question(
 
     if special_context is not None:
         chunks = special_context
+    elif direct_answer is not None and date_context is not None:
+        chunks = date_context
     else:
         # ---------------- Embed the question ----------------
         try:
