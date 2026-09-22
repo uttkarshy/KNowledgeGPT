@@ -16,7 +16,9 @@ _ALIASES = {
     "debit": {"debit", "withdrawal", "withdrawals", "withdrawalamount", "debitamount", "withdrawaldr", "debitdr"},
     "credit": {"credit", "deposit", "deposits", "creditamount", "depositamount", "depositcr", "creditcr"},
     "balance": {"balance", "runningbalance"},
-    "amount": {"amount"},
+    # Exact normalized aliases only; unknown currency/suffix labels must refuse.
+    # Parentheses, whitespace and ₹ decoration are stripped by _semantic().
+    "amount": {"amount", "amountinr", "amountusd", "amounteur", "amountgbp"},
     "direction": {"type", "direction", "drcr"},
 }
 _SEMANTICS = {alias: field for field, aliases in _ALIASES.items() for alias in aliases}

@@ -13,10 +13,77 @@ from app.services.rag.exact_date import DateEvidenceLimit
 from app.services.rag.exhaustive import calculate, transactions
 from app.services.rag.query_router import route
 from app.services.rag.retrieval import RetrievedChunk
+from app.services.rag.structured_financial import _schema, _semantic
 
 QUESTION = "What were my 3 largest expenses in July 2026? Give the date, description and amount for each."
 PHYSICAL = ["Statement Transactions", None, None, None, None, None, None]
 HEADER = ["#", "Date", "Description", "Chq/Ref. No.", "Withdrawal (Dr.)", "Deposit (Cr.)", "Balance"]
+
+
+@pytest.mark.parametrize(
+    "label",
+    ["Amount", "Amount (INR)", "Amount INR", "Amount (USD)", "Amount USD",
+     "Amount (EUR)", "Amount EUR", "Amount (GBP)", "Amount GBP",
+     "Amount (₹)", "₹ Amount", "Amount ₹", " amount (inr) "],
+)
+@pytest.mark.parametrize("propagated", [False, True])
+def test_supported_currency_amount_headers(label, propagated):
+    assert _semantic(label) == "amount"
+    assert _schema({"d": "Date", "t": "Type", "a": label}, propagated=propagated) == {
+        "d": "date", "t": "direction", "a": "amount",
+    }
+
+
+@pytest.mark.parametrize("label", ["Amount Foo", "Amount Balance", "Amount Reference", "Amount INR Foo"])
+@pytest.mark.parametrize("propagated", [False, True])
+def test_unknown_amount_suffixes_fail_closed(label, propagated):
+    assert _semantic(label) is None
+    with pytest.raises(DateEvidenceLimit):
+        _schema({"d": "Date", "t": "Type", "a": label}, propagated=propagated)
+
+
+@pytest.mark.parametrize("labels", [
+    {"d": "Date", "a": "Amount (INR)"},
+    {"d": "Date", "t": "Type", "a": "Amount (INR)", "b": "Amount USD"},
+    {"d": "Date", "t": "Type", "a": "Amount (INR)", "b": "Debit"},
+])
+def test_currency_amount_preserves_schema_ambiguity_checks(labels):
+    with pytest.raises(DateEvidenceLimit):
+        _schema(labels)
+
+
+@pytest.mark.parametrize("direct_keys", [True, False])
+def test_currency_header_production_top_three_debit_expenses(direct_keys):
+    header = ["Date", "Description", "Type", "Amount (INR)"]
+    values = [
+        ["2026-07-02", "UPI - GREEN MART", "Debit", "842.50"],
+        ["2026-07-03", "SALARY - NOVA SYSTEMS", "Credit", "62,500.00"],
+        ["2026-07-05", "RENT - ARYA RESIDENCY", "Debit", "14,500.00"],
+        ["2026-07-07", "METRO CARD RECHARGE", "Debit", "600.00"],
+        ["2026-07-10", "ELECTRICITY BILL", "Debit", "2,384.75"],
+        ["2026-07-12", "BOOKSTORE", "Debit", "1,299.00"],
+        ["2026-07-15", "MEDICAL STORE", "Debit", "735.20"],
+        ["2026-07-18", "FLIGHT BOOKING", "Debit", "6,890.00"],
+        ["2026-07-21", "RESTAURANT - BLUE PLATE", "Debit", "1,845.60"],
+        ["2026-07-25", "INTERNET BILL", "Debit", "999.00"],
+        ["2026-07-29", "ELECTRONICS - TECH HUB", "Debit", "12,499.00"],
+        ["2026-07-31", "GROCERY - DAILY BASKET", "Debit", "2,140.35"],
+        ["2026-07-31", "CAB - CITY RIDE", "Debit", "486.00"],
+    ]
+    chunks = table(values if direct_keys else [header, *values])
+    if direct_keys:
+        for chunk, cells in zip(chunks, values, strict=True):
+            chunk.structure["cells"] = dict(zip(header, cells, strict=True))
+    answer, sources = calculate(chunks, route(QUESTION), QUESTION)
+    assert "Analyzed 12 complete debit rows" in answer
+    assert [line.split(" | ")[:3] for line in answer.splitlines() if line.startswith("| 2026")] == [
+        ["| 2026-07-05", "RENT - ARYA RESIDENCY", "₹14,500.00"],
+        ["| 2026-07-29", "ELECTRONICS - TECH HUB", "₹12,499.00"],
+        ["| 2026-07-18", "FLIGHT BOOKING", "₹6,890.00"],
+    ]
+    offset = 0 if direct_keys else 1
+    assert sources == [chunks[i + offset] for i in (2, 10, 7)]
+    assert "SALARY" not in answer and "62,500.00" not in answer
 
 
 def table(values=None, *, document_id=None, table_id=0, page=1):
