@@ -60,6 +60,9 @@ async def estimate_processing(
     document.page_count = pages if document.file_type == FileType.PDF else None
     document.estimated_credits = max(1, pages) * settings.DOCUMENT_CREDITS_PER_PAGE
     await db.flush()
+    # The UPDATE expires SQL-generated fields such as updated_at. Load them
+    # inside the async session before FastAPI synchronously serializes the row.
+    await db.refresh(document)
     return document
 
 
