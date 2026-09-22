@@ -79,6 +79,7 @@ from app.services.llm.base import (
     LLMProvider,
     LLMProviderError,
     LLMRateLimitError,
+    LLMTransientError,
     LLMTimeoutError,
 )
 
@@ -178,8 +179,10 @@ def _translate_error(e: Exception) -> LLMProviderError:
     real HTTP status carried on `.code` is inspected to recover the same
     granularity our callers expect from any LLMProvider implementation.
     """
+    code = getattr(e, "code", None)
+    if code in (500, 502, 503, 504):
+        return LLMTransientError("Gemini is temporarily unavailable. Please retry later.")
     if isinstance(e, ClientError):
-        code = getattr(e, "code", None)
         if code == 429 or getattr(e,"status",None) == "RESOURCE_EXHAUSTED":
             return LLMRateLimitError("Gemini quota reached. Please try again later.", retry_after=_retry_after(e))
         if code in (401, 403):
@@ -188,6 +191,8 @@ def _translate_error(e: Exception) -> LLMProviderError:
             return LLMInvalidRequestError("Gemini rejected the request or model configuration.")
     if isinstance(e, (TimeoutError, asyncio.TimeoutError, httpx.TimeoutException)):
         return LLMTimeoutError("Gemini request timed out. Please retry.")
+    if isinstance(e, (httpx.ConnectError, httpx.NetworkError)):
+        return LLMTransientError("Gemini network connection failed. Please retry later.")
     return LLMProviderError("Gemini is unavailable. Please retry later.")
 
 

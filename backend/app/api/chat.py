@@ -63,7 +63,6 @@ async def get_messages(
     except chat_service.SessionNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
-
 @router.post("/sessions/{session_id}/ask")
 async def ask_question(
     session_id: uuid.UUID,
@@ -86,15 +85,16 @@ async def ask_question(
         session = await chat_service.get_owned_session(db, session_id=session_id, owner_id=current_user.id)
     except chat_service.SessionNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    user_id = current_user.id
 
     filters = RetrievalFilters(document_ids=body.document_ids, language=body.language)
-    await enforce_limit(settings, key=f"chat:{current_user.id}", limit=settings.RATE_LIMIT_CHAT_PER_MINUTE)
-    await enforce_limit(settings, key=f"chat_daily:{current_user.id}", limit=settings.RATE_LIMIT_CHAT_PER_DAY, seconds=86400)
+    await enforce_limit(settings, key=f"chat:{user_id}", limit=settings.RATE_LIMIT_CHAT_PER_MINUTE)
+    await enforce_limit(settings, key=f"chat_daily:{user_id}", limit=settings.RATE_LIMIT_CHAT_PER_DAY, seconds=86400)
     await enforce_limit(settings, key="chat_global", limit=settings.RATE_LIMIT_GLOBAL_CHAT_PER_DAY, seconds=86400)
-    charge_key = f"chat:{current_user.id}:{idempotency_key or uuid.uuid4()}"
+    charge_key = f"chat:{user_id}:{idempotency_key or uuid.uuid4()}"
     try:
         await credit_service.charge(
-            db, user_id=current_user.id, credits=settings.CHAT_CREDITS,
+            db, user_id=user_id, credits=settings.CHAT_CREDITS,
             operation="chat.answer", idempotency_key=charge_key,
             model=settings.LLM_CHAT_MODEL, metadata={"session_id": str(session_id)},
         )
@@ -113,7 +113,7 @@ async def ask_question(
                     elif event.type == "error":
                         await db.rollback()
                         await credit_service.refund(
-                            db, user_id=current_user.id, credits=settings.CHAT_CREDITS,
+                            db, user_id=user_id, credits=settings.CHAT_CREDITS,
                             operation="chat.refund", idempotency_key=f"refund:{charge_key}",
                             metadata={"reason": "answer_failed"},
                         )
@@ -130,7 +130,7 @@ async def ask_question(
         except Exception as exc:
             await db.rollback()
             await credit_service.refund(
-                db, user_id=current_user.id, credits=settings.CHAT_CREDITS,
+                db, user_id=user_id, credits=settings.CHAT_CREDITS,
                 operation="chat.refund", idempotency_key=f"refund:{charge_key}",
                 metadata={"reason": "stream_failed"},
             )

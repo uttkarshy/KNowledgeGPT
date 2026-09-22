@@ -189,6 +189,8 @@ class Settings(BaseSettings):
     # OpenAI settings
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_BASE_URL: Optional[str] = None  # allows Azure/OpenAI-compatible proxies
+    LLM_FALLBACK_PROVIDER: Optional[str] = None
+    LLM_FALLBACK_CHAT_MODEL: str = "gpt-5.6-luna"
     # Google Gemini settings
     GOOGLE_GEMINI_API_KEY: Optional[str] = None
     GOOGLE_GEMINI_BASE_URL: Optional[str] = None

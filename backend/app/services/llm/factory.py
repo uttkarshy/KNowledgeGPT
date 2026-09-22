@@ -37,6 +37,7 @@ from app.services.llm.future_providers import (
 )
 from app.services.llm.gemini_provider import GeminiProvider
 from app.services.llm.openai_provider import OpenAIProvider
+from app.services.llm.fallback import PrimaryWithFallbackProvider
 
 logger = logging.getLogger(__name__)
 
@@ -77,4 +78,9 @@ def build_llm_provider(settings: Settings) -> LLMProvider:
     settings.LLM_PROVIDER,
     provider_cls.__name__,
 )
-    return provider_cls(settings)
+    primary = provider_cls(settings)
+    if (settings.LLM_PROVIDER == LLMProviderName.GEMINI
+            and settings.LLM_FALLBACK_PROVIDER == LLMProviderName.OPENAI.value
+            and settings.OPENAI_API_KEY):
+        return PrimaryWithFallbackProvider(primary, OpenAIProvider(settings), settings)
+    return primary

@@ -47,6 +47,7 @@ from app.services.llm.base import (
     LLMProvider,
     LLMProviderError,
     LLMRateLimitError,
+    LLMTransientError,
     LLMTimeoutError,
 )
 
@@ -133,7 +134,7 @@ class OpenAIProvider(LLMProvider):
         except BadRequestError as e:
             raise LLMInvalidRequestError(f"OpenAI rejected request: {e}") from e
         except APIConnectionError as e:
-            raise LLMProviderError(f"OpenAI connection error: {e}") from e
+            raise LLMTransientError("OpenAI connection failed. Please retry later.") from e
 
         usage = LLMUsage(
             input_tokens=getattr(response.usage, "input_tokens", 0) or 0,
@@ -201,7 +202,7 @@ class OpenAIProvider(LLMProvider):
         except BadRequestError as e:
             raise LLMInvalidRequestError(f"OpenAI rejected request: {e}") from e
         except APIConnectionError as e:
-            raise LLMProviderError(f"OpenAI connection error: {e}") from e
+            raise LLMTransientError("OpenAI connection failed. Please retry later.") from e
 
     # ------------------------------------------------------------------
     # Embeddings (separate endpoint — Responses API does not do embeddings)

@@ -37,6 +37,10 @@ class LLMProviderError(Exception):
     provider-specific exception types."""
 
 
+class LLMTransientError(LLMProviderError):
+    """A provider failure that may succeed with a secondary provider."""
+
+
 class LLMRateLimitError(LLMProviderError):
     def __init__(self, message: str, *, retry_after: float | None = None):
         super().__init__(message)
