@@ -46,7 +46,7 @@ async def main(mode):
                     {**ids, "vector": "[" + ",".join(["1"] + ["0"] * 1535) + "]"},
                 )
             elif mode == "verify":
-                assert version == "0006_citation_order"
+                assert version == "0007_v21_credits_large_pdf"
                 row = (
                     await db.execute(
                         text(
