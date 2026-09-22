@@ -106,3 +106,103 @@ async def test_successful_answer_streams_and_generates_accurate_citations():
     assert done_events[0].citations[0]["document_name"] == "Q3 Report.pdf"
     assert done_events[0].citations[0]["page_number"] == 4
     assert done_events[0].citations[0]["similarity_score"] == 0.89
+
+def test_title_from_question_normalizes_and_bounds_title():
+    assert engine_module._title_from_question("  What   were my largest expenses?  ") == "What were my largest expenses?"
+
+    long_question = "What were all of the largest expenses in July 2026 across every uploaded bank statement and document?"
+    title = engine_module._title_from_question(long_question)
+
+    assert len(title) <= 72
+    assert title.endswith("...")
+    assert "  " not in title
+
+
+@pytest.mark.asyncio
+async def test_answer_question_titles_new_chat_from_first_question():
+    settings = get_settings()
+
+    class ProviderThatMustNotStream:
+        async def embed(self, request):
+            return EmbeddingResult(
+                embeddings=[[0.1] * 1536],
+                model="gemini-embedding-001",
+                dimensions=1536,
+                usage=LLMUsage(),
+            )
+
+        async def stream(self, request):
+            raise AssertionError("LLM must not stream when retrieval returns no chunks")
+            yield  # pragma: no cover
+
+    async def _empty_search(db, **kwargs):
+        return []
+
+    fake_session = ChatSession(
+        id=uuid.uuid4(),
+        owner_id=uuid.uuid4(),
+        knowledge_base_id=uuid.uuid4(),
+        title="New Chat",
+    )
+    db = _FakeSession()
+
+    with patch.object(engine_module, "_fetch_recent_history", _no_history), \
+         patch.object(engine_module, "similarity_search", _empty_search):
+        events = [
+            event
+            async for event in engine_module.answer_question(
+                db,
+                settings=settings,
+                provider=ProviderThatMustNotStream(),
+                session=fake_session,
+                question="  What   color is the project logo?  ",
+            )
+        ]
+
+    assert events[-1].type == "no_answer"
+    assert fake_session.title == "What color is the project logo?"
+
+
+@pytest.mark.asyncio
+async def test_answer_question_preserves_existing_chat_title():
+    settings = get_settings()
+
+    class ProviderThatMustNotStream:
+        async def embed(self, request):
+            return EmbeddingResult(
+                embeddings=[[0.1] * 1536],
+                model="gemini-embedding-001",
+                dimensions=1536,
+                usage=LLMUsage(),
+            )
+
+        async def stream(self, request):
+            raise AssertionError("LLM must not stream when retrieval returns no chunks")
+            yield  # pragma: no cover
+
+    async def _empty_search(db, **kwargs):
+        return []
+
+    fake_session = ChatSession(
+        id=uuid.uuid4(),
+        owner_id=uuid.uuid4(),
+        knowledge_base_id=uuid.uuid4(),
+        title="July Expense Analysis",
+    )
+    db = _FakeSession()
+
+    with patch.object(engine_module, "_fetch_recent_history", _no_history), \
+         patch.object(engine_module, "similarity_search", _empty_search):
+        [
+            event
+            async for event in engine_module.answer_question(
+                db,
+                settings=settings,
+                provider=ProviderThatMustNotStream(),
+                session=fake_session,
+                question="What else can you tell me?",
+            )
+        ]
+
+    assert fake_session.title == "July Expense Analysis"
+

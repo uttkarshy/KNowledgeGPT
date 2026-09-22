@@ -43,6 +43,14 @@ from app.services.rag.retrieval import RetrievalFilters, RetrievedChunk, similar
 logger = logging.getLogger(__name__)
 
 
+def _title_from_question(question: str, max_length: int = 72) -> str:
+    """Build a short deterministic chat title from the first question."""
+    title = " ".join(question.split())
+    if len(title) <= max_length:
+        return title
+    return title[: max_length - 3].rstrip() + "..."
+
+
 @dataclass
 class RAGStreamEvent:
     type: str  # "delta" | "done" | "no_answer" | "error"
@@ -106,6 +114,9 @@ async def answer_question(
     user_message = ChatMessageModel(session_id=session.id, role=DBMessageRole.USER, content=question)
     db.add(user_message)
     await db.flush()
+
+    if session.title == "New Chat":
+        session.title = _title_from_question(question)
 
     direct_answer = None
     special_context = None
