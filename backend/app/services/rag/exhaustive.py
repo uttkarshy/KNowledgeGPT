@@ -95,6 +95,10 @@ async def evidence(db, *, owner_id, kb_id, filters=None, lexical=None):
 
 
 def _date(value):
+    # Parse ISO dates before the trailing two-digit year expansion below,
+    # which would otherwise expand the day (2026-07-02 -> 2026-07-2002).
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value.strip()):
+        return date.fromisoformat(value.strip())
     match = re.fullmatch(r"(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})", value.strip())
     if match:
         d, m, y = map(int, match.groups())
