@@ -6,12 +6,13 @@ import type { Citation } from "@/types";
 interface SourcesRailProps {
   citations: Citation[];
   activeIndex: number | null;
+  idPrefix?: string;
 }
 
 /** Renders each citation as a stacked "index card" — the confidence score
  * shows as a dotted-fill meter rather than a percentage badge, continuing
  * the ledger/archive visual language instead of a generic progress bar. */
-export function SourcesRail({ citations, activeIndex }: SourcesRailProps) {
+export function SourcesRail({ citations, activeIndex, idPrefix = "source-card" }: SourcesRailProps) {
   if (citations.length === 0) {
     return (
       <aside className="hidden w-72 shrink-0 border-l border-ink-950/[0.07] bg-white/40 p-5 dark:border-white/10 dark:bg-ink-900/30 xl:block">
@@ -34,7 +35,7 @@ export function SourcesRail({ citations, activeIndex }: SourcesRailProps) {
           return (
             <div
               key={`${citation.document_id}-${citation.page_number}-${i}`}
-              id={`source-card-${index}`}
+              id={`${idPrefix}-${index}`}
               className={`relative overflow-hidden rounded-2xl border bg-white p-4 shadow-sm transition dark:bg-ink-900 ${
                 isActive
                   ? "border-highlight-amber/70 ring-4 ring-highlight-amber/10 animate-pulse-glow"

@@ -8,6 +8,7 @@ import { ChatInput } from "@/components/chat/chat-input";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { SessionRail } from "@/components/chat/session-rail";
 import { SourcesRail } from "@/components/chat/sources-rail";
+import { MobileSourcesSheet } from "@/components/chat/mobile-sources-sheet";
 import { useAskQuestion, useCreateSession, useMessages, useSessions } from "@/hooks/use-chat";
 import type { Citation } from "@/types";
 import { Brand } from "@/components/brand";
@@ -43,6 +44,7 @@ function ChatPageInner() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(searchParams.get("session"));
   const [activeCitationIndex, setActiveCitationIndex] = useState<number | null>(null);
   const [lastCitations, setLastCitations] = useState<Citation[]>([]);
+  const [mobileSourcesOpen, setMobileSourcesOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const { data: sessions = [], error: sessionsError } = useSessions(knowledgeBaseId);
@@ -61,6 +63,7 @@ function ChatPageInner() {
   useEffect(() => {
     setLastCitations([]);
     setActiveCitationIndex(null);
+    setMobileSourcesOpen(false);
     if (activeSessionId && knowledgeBaseId) router.replace(`/chat?kb=${knowledgeBaseId}&session=${activeSessionId}`, { scroll: false });
   }, [activeSessionId, knowledgeBaseId, router]);
 
@@ -86,11 +89,25 @@ function ChatPageInner() {
     ask(question);
   };
 
+  const focusCitation = (index: number, mobile: boolean) => {
+    window.requestAnimationFrame(() => {
+      document
+        .getElementById(`${mobile ? "mobile-source-card" : "source-card"}-${index}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  };
+
   const handleCitationClick = (index: number) => {
     setActiveCitationIndex(index);
-    document
-      .getElementById(`source-card-${index}`)
-      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const mobile = window.matchMedia("(max-width: 1023px)").matches;
+    if (mobile) setMobileSourcesOpen(true);
+    focusCitation(index, mobile);
+  };
+
+  const handleViewSources = (citations: Citation[]) => {
+    setLastCitations(citations);
+    setActiveCitationIndex(null);
+    setMobileSourcesOpen(true);
   };
 
   const lastMessageCitations = messages.length > 0 ? messages[messages.length - 1]?.citations ?? [] : [];
@@ -150,6 +167,7 @@ function ChatPageInner() {
               outputTokens={message.output_tokens}
               activeCitationIndex={activeCitationIndex}
               onCitationClick={(index) => { setLastCitations(message.citations); handleCitationClick(index); }}
+              onViewSources={() => handleViewSources(message.citations)}
             />
           ))}
 
@@ -160,6 +178,7 @@ function ChatPageInner() {
               citations={streamingCitations}
               activeCitationIndex={activeCitationIndex}
               onCitationClick={handleCitationClick}
+              onViewSources={() => handleViewSources(streamingCitations)}
             />
           )}
 
@@ -189,7 +208,15 @@ function ChatPageInner() {
         <ChatInput onSend={handleSend} disabled={isStreaming || !activeSessionId} />
       </div>
 
-      <SourcesRail citations={displayedCitations} activeIndex={activeCitationIndex} />
+      <div className="hidden lg:contents">
+        <SourcesRail citations={displayedCitations} activeIndex={activeCitationIndex} />
+      </div>
+      <MobileSourcesSheet
+        open={mobileSourcesOpen}
+        citations={displayedCitations}
+        activeIndex={activeCitationIndex}
+        onClose={() => setMobileSourcesOpen(false)}
+      />
       </div>
     </div>
   );

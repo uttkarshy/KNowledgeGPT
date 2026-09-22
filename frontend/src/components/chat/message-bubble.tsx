@@ -14,6 +14,7 @@ interface MessageBubbleProps {
   outputTokens?: number | null;
   activeCitationIndex: number | null;
   onCitationClick: (index: number) => void;
+  onViewSources?: () => void;
 }
 
 export function MessageBubble({
@@ -26,6 +27,7 @@ export function MessageBubble({
   outputTokens,
   activeCitationIndex,
   onCitationClick,
+  onViewSources,
 }: MessageBubbleProps) {
   const isUser = role === "user";
 
@@ -58,6 +60,17 @@ export function MessageBubble({
             />
           )}
         </div>
+
+        {!isUser && citations.length > 0 && onViewSources && (
+          <button
+            type="button"
+            onClick={onViewSources}
+            className="mt-3 inline-flex items-center rounded-full border border-ink-950/10 bg-white px-3 py-1.5 text-xs font-medium text-ink-700 shadow-sm transition hover:border-highlight-amber/40 hover:text-highlight-amberDark dark:border-white/10 dark:bg-ink-900 dark:text-mist-100 lg:hidden"
+            aria-label={`View ${citations.length} ${citations.length === 1 ? "source" : "sources"}`}
+          >
+            View {citations.length} {citations.length === 1 ? "source" : "sources"}
+          </button>
+        )}
 
         {!isUser && (modelUsed || latencyMs) && (
           <div className="mt-2 flex gap-2 font-mono text-[9px] uppercase tracking-wide text-ink-300">
