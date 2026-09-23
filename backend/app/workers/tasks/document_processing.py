@@ -214,7 +214,15 @@ async def _process_locked(self: Task, document_id: str) -> None:
             await process_document_async(self, document_id)
 
 
-@celery_app.task(bind=True, name="app.workers.tasks.document_processing.process_document")
+_task_settings = get_settings()
+
+
+@celery_app.task(
+    bind=True,
+    name="app.workers.tasks.document_processing.process_document",
+    soft_time_limit=_task_settings.CELERY_TASK_SOFT_TIME_LIMIT,
+    time_limit=_task_settings.CELERY_TASK_TIME_LIMIT,
+)
 def process_document(self: Task, document_id: str) -> None:
     async def _run_and_cleanup() -> None:
         try:
@@ -224,38 +232,44 @@ def process_document(self: Task, document_id: str) -> None:
     asyncio.run(_run_and_cleanup())
 
 
+async def reconcile_stalled_documents_async(*, now: datetime | None = None) -> None:
+    """Mark abandoned jobs retryable after the worker process has released its lock."""
+    from sqlalchemy import select
+
+    settings = get_settings()
+    now = now or datetime.now(timezone.utc)
+    cutoff = now-timedelta(seconds=settings.CELERY_TASK_TIME_LIMIT*2)
+    async with AsyncSessionLocal() as db:
+        ids = list((await db.scalars(select(Document.id).where(
+            Document.status.notin_([DocumentStatus.COMPLETED,DocumentStatus.FAILED]),
+            Document.updated_at < cutoff).limit(100))).all())
+    for doc_id in ids:
+        key = int.from_bytes(hashlib.sha256(str(doc_id).encode()).digest()[:8], 'big', signed=True)
+        async with AsyncSessionLocal() as db:
+            if not await db.scalar(text('SELECT pg_try_advisory_xact_lock(:key)'), {'key':key}):
+                continue  # active worker owns this document, even if slow
+            doc = await db.get(Document,doc_id,with_for_update=True)
+            if not doc or doc.status in (DocumentStatus.COMPLETED,DocumentStatus.FAILED):
+                continue
+            if doc.next_retry_at and doc.next_retry_at > now:
+                continue
+            doc.status = DocumentStatus.FAILED
+            doc.error_code = 'processing_timeout'
+            doc.last_error_code = doc.error_code
+            doc.last_error_at = now
+            doc.next_retry_at = None
+            doc.retryable = bool(doc.confirmed_at and doc.temp_storage_key)
+            doc.status_detail = ('Processing stopped before completion. Retry Processing to resume saved batches.'
+                if doc.retryable else 'Upload did not complete. Upload the file again.')
+            await db.commit()
+
+
 @celery_app.task(name="app.workers.tasks.document_processing.reconcile_stalled_documents")
 def reconcile_stalled_documents() -> None:
     """Recover abandoned uploads and jobs killed before Python cleanup ran."""
-    async def reconcile():
-        from sqlalchemy import select
-        settings = get_settings()
-        now = datetime.now(timezone.utc)
-        cutoff = now-timedelta(seconds=settings.CELERY_TASK_TIME_LIMIT*2)
+    async def _run_and_cleanup() -> None:
         try:
-            async with AsyncSessionLocal() as db:
-                ids = list((await db.scalars(select(Document.id).where(
-                    Document.status.notin_([DocumentStatus.COMPLETED,DocumentStatus.FAILED]),
-                    Document.updated_at < cutoff).limit(100))).all())
-            for doc_id in ids:
-                key = int.from_bytes(hashlib.sha256(str(doc_id).encode()).digest()[:8], 'big', signed=True)
-                async with AsyncSessionLocal() as db:
-                    if not await db.scalar(text('SELECT pg_try_advisory_xact_lock(:key)'), {'key':key}):
-                        continue  # active worker owns this document, even if slow
-                    doc = await db.get(Document,doc_id,with_for_update=True)
-                    if not doc or doc.status in (DocumentStatus.COMPLETED,DocumentStatus.FAILED):
-                        continue
-                    if doc.next_retry_at and doc.next_retry_at > now:
-                        continue
-                    doc.status = DocumentStatus.FAILED
-                    doc.error_code = 'processing_timeout'
-                    doc.last_error_code = doc.error_code
-                    doc.last_error_at = now
-                    doc.next_retry_at = None
-                    doc.retryable = bool(doc.confirmed_at and doc.temp_storage_key)
-                    doc.status_detail = ('Processing stopped before completion. Retry Processing to resume saved batches.'
-                        if doc.retryable else 'Upload did not complete. Upload the file again.')
-                    await db.commit()
+            await reconcile_stalled_documents_async()
         finally:
             await dispose_engine()
-    asyncio.run(reconcile())
+    asyncio.run(_run_and_cleanup())

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 import re
+import subprocess
 
 import cv2
 import numpy as np
@@ -12,6 +14,31 @@ from PIL import Image
 from app.services.extraction.schemas import ExtractedBlock, ExtractedPage, SectionKind
 from app.services.extraction.table_rows import row_block
 from app.services.processing_errors import ProcessingFailure
+
+
+_TESSERACT_DISCOVERY_TIMEOUT_SECONDS = 10
+
+
+@lru_cache(maxsize=1)
+def _installed_languages() -> tuple[str, ...]:
+    """List Tesseract languages without pytesseract's unbounded subprocess."""
+    try:
+        result = subprocess.run(
+            [pytesseract.pytesseract.tesseract_cmd, "--list-langs"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=_TESSERACT_DISCOVERY_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError("OCR language discovery failed") from exc
+    if result.returncode not in (0, 1):
+        raise RuntimeError("OCR language discovery failed")
+    return tuple(
+        line.strip()
+        for line in result.stdout.decode("utf-8", errors="replace").splitlines()
+        if re.fullmatch(r"[a-z0-9_]+", line.strip())
+    )
 
 
 def normalize(image):
@@ -111,7 +138,7 @@ def scanned_page(image: Image.Image, page_number: int) -> ExtractedPage:
         image, rotation = normalize(image)
         gray = np.array(image.convert("L"))
         grids, clean = _grids(gray)
-        installed = pytesseract.get_languages(config="")
+        installed = _installed_languages()
         languages = "+".join(code for code in ("eng", "hin") if code in installed)
         if not languages:
             raise RuntimeError("OCR languages missing")

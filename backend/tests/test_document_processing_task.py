@@ -1,14 +1,21 @@
 import uuid
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from billiard.exceptions import SoftTimeLimitExceeded
 from celery.exceptions import MaxRetriesExceededError, Retry
 
 from app.core.aws import S3Error
 from app.models.document import Document
 from app.models.enums import DocumentStatus, FileType
 from app.workers.tasks import document_processing as dp
-from app.workers.tasks.document_processing import DocumentProcessingError, process_document
+from app.workers.tasks.document_processing import (
+    DocumentProcessingError,
+    process_document,
+    reconcile_stalled_documents_async,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -38,6 +45,14 @@ def test_task_routes_to_the_queue_the_worker_actually_consumes():
 
     route = celery_app.amqp.router.route({}, process_document.name)
     assert route["queue"].name == "document_processing"
+
+
+def test_document_task_has_explicit_soft_and_hard_limits():
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    assert process_document.soft_time_limit == settings.CELERY_TASK_SOFT_TIME_LIMIT
+    assert process_document.time_limit == settings.CELERY_TASK_TIME_LIMIT
 
 
 def test_retry_exhaustion_marks_document_failed():
@@ -126,3 +141,116 @@ def test_unanticipated_exception_is_caught_by_outer_safety_net():
     status, detail, _progress = captured[0]
     assert status == DocumentStatus.FAILED
     assert "unexpected" in detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_soft_timeout_marks_document_failed_and_retryable(monkeypatch):
+    doc_id = str(uuid.uuid4())
+    fake_doc = _fake_document(doc_id)
+    fake_doc.owner_id = uuid.uuid4()
+    fake_doc.knowledge_base_id = uuid.uuid4()
+    fake_doc.name = "pathological.pdf"
+    updates = []
+    failures = []
+
+    async def fake_update_status(document_id, *, status, detail, progress):
+        updates.append((status, detail, progress))
+
+    async def fake_record_failure(document_id, failure, delay=None):
+        failures.append((failure, delay))
+
+    def fake_download(*, destination_path, **_kwargs):
+        with open(destination_path, "wb") as file:
+            file.write(b"%PDF-1.7 synthetic")
+
+    db = AsyncMock()
+    db.get.return_value = fake_doc
+
+    class SessionContext:
+        async def __aenter__(self):
+            return db
+
+        async def __aexit__(self, *_args):
+            return False
+
+    provider = SimpleNamespace(aclose=AsyncMock())
+    monkeypatch.setattr(dp, "_load_document", AsyncMock(return_value=fake_doc))
+    monkeypatch.setattr(dp, "_update_status", fake_update_status)
+    monkeypatch.setattr(dp, "_record_failure", fake_record_failure)
+    monkeypatch.setattr(dp, "AsyncSessionLocal", SessionContext)
+    monkeypatch.setattr(dp, "download_to_path", fake_download)
+    monkeypatch.setattr(dp, "scan_file", lambda **_kwargs: None)
+    monkeypatch.setattr(dp, "validate_uploaded_file", lambda **_kwargs: SimpleNamespace(checksum_sha256="a" * 64))
+    monkeypatch.setattr(dp, "build_llm_provider", lambda _settings: provider)
+    monkeypatch.setattr(dp, "process_document_embeddings", AsyncMock(side_effect=SoftTimeLimitExceeded()))
+
+    with pytest.raises(DocumentProcessingError, match="time budget"):
+        await dp.process_document_async(process_document, doc_id)
+
+    assert updates[-1][0] == DocumentStatus.FAILED
+    assert failures[-1][0].code == "processing_timeout"
+    assert failures[-1][0].retryable is True
+    provider.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_marks_unlocked_stalled_document_retryable(monkeypatch):
+    doc_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    doc = SimpleNamespace(
+        status=DocumentStatus.EXTRACTING,
+        confirmed_at=now,
+        temp_storage_key="saved/pathological.pdf",
+        next_retry_at=None,
+    )
+    lookup_db = AsyncMock()
+    lookup_db.scalars.return_value = SimpleNamespace(all=lambda: [doc_id])
+    update_db = AsyncMock()
+    update_db.scalar.return_value = True
+    update_db.get.return_value = doc
+    sessions = iter([lookup_db, update_db])
+
+    class SessionContext:
+        def __init__(self):
+            self.db = next(sessions)
+
+        async def __aenter__(self):
+            return self.db
+
+        async def __aexit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(dp, "AsyncSessionLocal", SessionContext)
+    await reconcile_stalled_documents_async(now=now)
+
+    assert doc.status == DocumentStatus.FAILED
+    assert doc.error_code == "processing_timeout"
+    assert doc.retryable is True
+    assert "Retry Processing" in doc.status_detail
+    update_db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_cannot_mutate_a_document_while_active_lock_is_held(monkeypatch):
+    doc_id = uuid.uuid4()
+    lookup_db = AsyncMock()
+    lookup_db.scalars.return_value = SimpleNamespace(all=lambda: [doc_id])
+    lock_db = AsyncMock()
+    lock_db.scalar.return_value = False
+    sessions = iter([lookup_db, lock_db])
+
+    class SessionContext:
+        def __init__(self):
+            self.db = next(sessions)
+
+        async def __aenter__(self):
+            return self.db
+
+        async def __aexit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(dp, "AsyncSessionLocal", SessionContext)
+    await reconcile_stalled_documents_async(now=datetime.now(timezone.utc))
+
+    lock_db.get.assert_not_awaited()
+    lock_db.commit.assert_not_awaited()

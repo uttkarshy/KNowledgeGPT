@@ -1,3 +1,5 @@
+import subprocess
+import time
 import uuid
 
 import fitz
@@ -63,6 +65,39 @@ def test_native_pdf_stays_on_fast_path(tmp_path, monkeypatch):
     extracted = PDFExtractor().extract(str(path), settings=Settings())
     assert "Master of Computer Applications" in " ".join(b.text for b in extracted.all_blocks())
     assert not extracted.pages[0].was_ocr
+
+
+def test_pathological_native_table_discovery_is_bounded(monkeypatch):
+    from app.services.extraction import pdf_extractor
+
+    class BlockingPage:
+        def find_tables(self):
+            time.sleep(1)
+            return type("Tables", (), {"tables": []})()
+
+    monkeypatch.setattr(pdf_extractor, "_TABLE_EXTRACTION_TIMEOUT_SECONDS", 0.02)
+    started = time.monotonic()
+    with pytest.raises(ProcessingFailure) as error:
+        PDFExtractor()._extract_native_blocks(BlockingPage(), 1, None)
+    assert time.monotonic() - started < 0.5
+    assert error.value.code == "processing_timeout"
+    assert error.value.retryable is True
+
+
+def test_ocr_language_discovery_subprocess_is_bounded(monkeypatch):
+    from app.services.ocr import structured
+
+    structured._installed_languages.cache_clear()
+    monkeypatch.setattr(
+        structured.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+        ),
+    )
+    with pytest.raises(RuntimeError, match="language discovery"):
+        structured._installed_languages()
+    structured._installed_languages.cache_clear()
 
 
 def test_real_rotated_image_ocr_has_page_identity():

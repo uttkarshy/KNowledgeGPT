@@ -10,7 +10,11 @@ page is handled correctly.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import re
+import signal
+import threading
+import time
 
 import fitz  # PyMuPDF
 from PIL import Image
@@ -30,6 +34,43 @@ from app.services.processing_errors import ProcessingFailure
 
 _MIN_CHARS_PER_PAGE_TO_SKIP_OCR = 20  # below this, treat the page as scanned
 _OCR_RENDER_DPI_ZOOM = 3.0  # ~216 DPI, good balance of OCR accuracy vs. speed
+_TABLE_EXTRACTION_TIMEOUT_SECONDS = 30
+
+
+class _TableExtractionTimedOut(Exception):
+    pass
+
+
+@contextmanager
+def _table_extraction_deadline(seconds: float):
+    """Interrupt PyMuPDF table discovery before it can monopolize a worker.
+
+    Celery's production prefork child runs the task on its main thread on
+    Linux, where an interval timer can interrupt PyMuPDF's Python table
+    analysis. Keep a no-op fallback for non-POSIX/unit-test callers; the
+    Celery task's hard time limit remains the final process-level guard.
+    """
+    if not hasattr(signal, "setitimer") or threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    started = time.monotonic()
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    previous_delay, previous_interval = signal.getitimer(signal.ITIMER_REAL)
+
+    def _raise_timeout(_signum, _frame):
+        raise _TableExtractionTimedOut
+
+    signal.signal(signal.SIGALRM, _raise_timeout)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        if previous_delay > 0:
+            remaining = max(0.001, previous_delay - (time.monotonic() - started))
+            signal.setitimer(signal.ITIMER_REAL, remaining, previous_interval)
 
 
 def _heading_level_for_span(span_size: float, body_size: float) -> int | None:
@@ -123,7 +164,16 @@ class PDFExtractor(TextExtractor):
     ) -> tuple[list[ExtractedBlock], str | None]:
         blocks: list[ExtractedBlock] = []
         bounds = []
-        for table_id, table in enumerate(page.find_tables().tables):
+        try:
+            with _table_extraction_deadline(_TABLE_EXTRACTION_TIMEOUT_SECONDS):
+                tables = page.find_tables().tables
+        except _TableExtractionTimedOut as exc:
+            raise ProcessingFailure(
+                "processing_timeout",
+                "PDF table extraction exceeded the time budget. Retry Processing or upload a simplified PDF.",
+                retryable=True,
+            ) from exc
+        for table_id, table in enumerate(tables):
             rows = table.extract()
             if len(rows) < 2:
                 continue
