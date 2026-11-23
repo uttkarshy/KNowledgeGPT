@@ -32,11 +32,11 @@ class Document(Base, UUIDPKMixin, TimestampMixin):
     )
 
     name: Mapped[str] = mapped_column(String(512), nullable=False)
-    file_type: Mapped[FileType] = mapped_column(Enum(FileType, name="file_type"), nullable=False)
+    file_type: Mapped[FileType] = mapped_column(Enum(FileType, name="file_type", values_callable=lambda enum: [e.value for e in enum]), nullable=False)
     language: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)  # e.g. "en", "hi", "en+hi"
 
     status: Mapped[DocumentStatus] = mapped_column(
-        Enum(DocumentStatus, name="document_status"),
+        Enum(DocumentStatus, name="document_status", values_callable=lambda enum: [e.value for e in enum]),
         default=DocumentStatus.PENDING,
         nullable=False,
         index=True,

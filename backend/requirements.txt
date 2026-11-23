@@ -15,7 +15,7 @@ passlib>=1.7.4
 # for short passwords. Pin <4.1 until passlib ships a fix, or migrate to
 # a maintained CryptContext backend (e.g. argon2-cffi) instead.
 bcrypt>=4.0.1,<4.1
-python-jose[cryptography]>=3.3
+PyJWT[crypto]>=2.10.1,<3
 httpx>=0.27
 redis>=5.0
 aiosmtplib>=3.0

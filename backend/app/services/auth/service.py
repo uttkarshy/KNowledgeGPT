@@ -168,7 +168,7 @@ async def rotate_refresh_token(
     a strong signal of theft/replay — all of that user's tokens are revoked
     as a precaution."""
     token_hash = hash_token(plaintext_refresh_token)
-    stored = await db.scalar(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
+    stored = await db.scalar(select(RefreshToken).where(RefreshToken.token_hash == token_hash).with_for_update())
 
     if not stored:
         raise InvalidOrExpiredTokenError("Refresh token not recognized")
@@ -179,6 +179,7 @@ async def rotate_refresh_token(
             .where(RefreshToken.user_id == stored.user_id, RefreshToken.revoked == False)  # noqa: E712
             .values(revoked=True)
         )
+        await db.commit()  # Keep session revocations when the dependency rolls back the rejected request.
         raise InvalidOrExpiredTokenError(
             "This refresh token was already used. All sessions have been revoked as a precaution."
         )

@@ -22,9 +22,10 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional
 
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import InvalidTokenError as JWTError
 from passlib.context import CryptContext
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from app.core.config import Settings
 
@@ -92,7 +93,7 @@ def decode_access_token(token: str, settings: Settings) -> TokenPayload:
             if payload.type != TokenType.ACCESS.value:
                 raise InvalidTokenError("Token is not an access token")
             return payload
-        except JWTError as e:
+        except (JWTError, ValidationError) as e:
             last_error = e
             continue
     raise InvalidTokenError(f"Could not validate token: {last_error}")

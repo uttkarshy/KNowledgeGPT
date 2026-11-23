@@ -116,8 +116,11 @@ async def confirm_upload_and_enqueue(
 ) -> Document:
     """Verifies the object actually landed in S3 (never trust the client's
     say-so), updates status, and enqueues the Celery processing task."""
-    document = await get_owned_document(db, document_id=document_id, owner_id=owner_id)
-
+    document = await db.scalar(select(Document).where(
+        Document.id == document_id, Document.owner_id == owner_id,
+    ).with_for_update())
+    if document is None:
+        raise DocumentNotFoundError("Document not found")
     if document.status != DocumentStatus.PENDING:
         raise DocumentServiceError(f"Document is already in status '{document.status.value}'")
 
@@ -133,13 +136,20 @@ async def confirm_upload_and_enqueue(
     document.original_size_bytes = actual_size
     document.status = DocumentStatus.VIRUS_SCANNING
     document.processing_progress_pct = 5
-    await db.flush()
+    await db.commit()
+    await db.refresh(document)
 
     # Imported lazily to avoid FastAPI process needing Celery's broker
     # connection at import time (keeps `uvicorn app.main:app` fast to boot).
     from app.workers.tasks.document_processing import process_document
 
-    process_document.delay(str(document.id))
+    try:
+        process_document.delay(str(document.id))
+    except Exception:
+        document.status = DocumentStatus.FAILED
+        document.status_detail = "Processing queue unavailable. Upload again later."
+        await db.commit()
+        raise DocumentServiceError("Processing queue unavailable.") from None
     return document
 
 

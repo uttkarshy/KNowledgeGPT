@@ -26,7 +26,8 @@ def upgrade() -> None:
     # ------------------------------------------------------------------
     # Extensions
     # ------------------------------------------------------------------
-    op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")   # gen_random_uuid()
+    if not op.get_bind().execute(sa.text("SELECT to_regprocedure('gen_random_uuid()')")).scalar():
+        op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")     # pgvector
 
     # ------------------------------------------------------------------
