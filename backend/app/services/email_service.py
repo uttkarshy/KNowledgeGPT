@@ -24,8 +24,7 @@ logger = logging.getLogger(__name__)
 
 async def _send(settings: Settings, *, to: str, subject: str, html_body: str) -> None:
     if not settings.SMTP_HOST:
-        logger.info("SMTP not configured — logging email instead of sending.\nTo: %s\nSubject: %s\nBody:\n%s",
-                     to, subject, html_body)
+        logger.info("Transactional email delivery skipped because SMTP is unconfigured")
         return
 
     message = EmailMessage()

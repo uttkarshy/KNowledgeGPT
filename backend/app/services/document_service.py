@@ -128,6 +128,8 @@ async def confirm_upload_and_enqueue(
             f"Could not find the uploaded file in storage — did the upload complete? ({e})"
         ) from e
 
+    if actual_size != document.original_size_bytes or not 0 < actual_size <= settings.MAX_UPLOAD_SIZE_BYTES:
+        raise DocumentServiceError("Uploaded size does not match the allowed file size")
     document.original_size_bytes = actual_size
     document.status = DocumentStatus.VIRUS_SCANNING
     document.processing_progress_pct = 5

@@ -80,6 +80,7 @@ class Settings(BaseSettings):
     # ---------------------------------------------------------------
     FRONTEND_BASE_URL: str = "http://localhost:3000"
     EMAIL_FROM: str = "noreply@knowledgegpt.example.com"
+    SUPPORT_INBOX: Optional[str] = None
     SMTP_HOST: Optional[str] = None
     SMTP_PORT: int = 587
     SMTP_USER: Optional[str] = None

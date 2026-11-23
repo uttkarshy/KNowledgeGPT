@@ -22,6 +22,10 @@ class KnowledgeBaseNotFoundError(KnowledgeBaseServiceError):
 async def create_knowledge_base(
     db: AsyncSession, *, owner_id: uuid.UUID, body: CreateKnowledgeBaseRequest
 ) -> KnowledgeBase:
+    if body.parent_folder_id:
+        parent = await get_owned_knowledge_base(db, kb_id=body.parent_folder_id, owner_id=owner_id)
+        if not parent.is_folder:
+            raise KnowledgeBaseNotFoundError("Parent folder unavailable")
     kb = KnowledgeBase(
         owner_id=owner_id,
         parent_folder_id=body.parent_folder_id,

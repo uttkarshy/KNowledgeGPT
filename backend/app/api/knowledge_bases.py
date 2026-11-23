@@ -25,7 +25,10 @@ async def create_knowledge_base(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await knowledge_base_service.create_knowledge_base(db, owner_id=current_user.id, body=body)
+    try:
+        return await knowledge_base_service.create_knowledge_base(db, owner_id=current_user.id, body=body)
+    except knowledge_base_service.KnowledgeBaseNotFoundError as exc:
+        raise HTTPException(404, "Parent folder unavailable") from exc
 
 
 @router.get("", response_model=list[KnowledgeBasePublic])

@@ -14,6 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.support import router as support_router
 from app.api.auth import router as auth_router
 from app.api.admin import router as admin_router
 from app.api.chat import router as chat_router
@@ -101,6 +102,7 @@ async def deep_health_check():
     )
 
 
+app.include_router(support_router)
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(knowledge_bases_router)
