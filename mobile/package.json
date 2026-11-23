@@ -36,5 +36,10 @@
   "devDependencies": {
     "@types/react": "~19.2.2",
     "typescript": "~5.9.2"
+  },
+  "overrides": {
+    "react-native-markdown-display": {
+      "markdown-it": "14.3.3"
+    }
   }
 }

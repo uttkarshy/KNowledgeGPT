@@ -10,3 +10,5 @@ coverage/
 *.aab
 credentials.json
 .env*
+phone-screens/
+artifacts/

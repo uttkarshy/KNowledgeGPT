@@ -1,0 +1,71 @@
+name: Android preview
+on:
+  push:
+    branches: [feature/knowledgegpt-android]
+    paths: ['mobile/**', '.github/workflows/android-preview.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: android-preview-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - run: npm ci --no-audit --no-fund && npm run typecheck && npm test
+      - run: npx expo prebuild --platform android --no-install
+      - name: Build self-contained preview and debug APKs
+        run: |
+          cd android
+          keytool -genkeypair -keystore "$RUNNER_TEMP/kg-debug.jks" -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 90 -dname "CN=Android Debug"
+          cp "$RUNNER_TEMP/kg-debug.jks" app/debug.keystore
+          ./gradlew :app:assembleRelease :app:assembleDebug -PreactNativeArchitectures=arm64-v8a,x86_64 --max-workers=2
+          mkdir -p ../artifacts
+          cp app/build/outputs/apk/release/app-release.apk ../artifacts/KnowledgeGPT-preview.apk
+          cp app/build/outputs/apk/debug/app-debug.apk ../artifacts/KnowledgeGPT-debug.apk
+          cd ../artifacts
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose KnowledgeGPT-preview.apk
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 4 KnowledgeGPT-preview.apk
+          sha256sum *.apk > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KnowledgeGPT-Android-APKs
+          path: mobile/artifacts/
+          retention-days: 7
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install, exercise Android screens and capture screenshots
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          arch: x86_64
+          profile: pixel_5
+          disable-animations: true
+          working-directory: mobile
+          script: |
+            adb install -r artifacts/KnowledgeGPT-preview.apk
+            python scripts/android_smoke.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KnowledgeGPT-phone-screens
+          path: mobile/phone-screens
+          retention-days: 7
